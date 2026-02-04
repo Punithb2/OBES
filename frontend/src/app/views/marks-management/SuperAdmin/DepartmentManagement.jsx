@@ -34,7 +34,7 @@ const DeptModal = ({ isOpen, onClose, onSave, dept = null }) => {
                         <input 
                             required
                             type="text" 
-                            disabled={!!dept} // ID cannot be changed after creation
+                            disabled={!!dept} 
                             value={formData.id}
                             onChange={e => setFormData({...formData, id: e.target.value})}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
@@ -70,7 +70,8 @@ const DepartmentManagement = () => {
     const fetchDepartments = async () => {
         try {
             setLoading(true);
-            const res = await api.get('/departments');
+            // FIXED: Added trailing slash
+            const res = await api.get('/departments/');
             setDepartments(res.data);
         } catch (error) {
             console.error("Failed to fetch departments", error);
@@ -84,9 +85,11 @@ const DepartmentManagement = () => {
     const handleSave = async (data) => {
         try {
             if (modal.dept) {
-                await api.patch(`/departments/${modal.dept.id}`, data);
+                // FIXED: Added trailing slash
+                await api.patch(`/departments/${modal.dept.id}/`, data);
             } else {
-                await api.post('/departments', data);
+                // FIXED: Added trailing slash
+                await api.post('/departments/', data);
             }
             setModal({ isOpen: false, dept: null });
             fetchDepartments();
@@ -99,7 +102,8 @@ const DepartmentManagement = () => {
     const handleDelete = async (id) => {
         if(window.confirm("Delete this department? Ensure no users/courses are assigned to it first.")) {
             try {
-                await api.delete(`/departments/${id}`);
+                // FIXED: Added trailing slash
+                await api.delete(`/departments/${id}/`);
                 fetchDepartments();
             } catch (error) { console.error(error); }
         }

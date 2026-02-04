@@ -14,7 +14,6 @@ const IndirectCoPage = lazy(() => import("./views/marks-management/Faculty/Indir
 const CoPoAttainmentPage = lazy(() => import("./views/marks-management/Faculty/CoPoAttainmentPage"));
 const AttainmentReportPage = lazy(() => import("./views/marks-management/Faculty/AttainmentReportPage"));
 const StudentReportsPage = lazy(() => import("./views/marks-management/Faculty/StudentReportsPage"));
-// NEW IMPORT
 const StudentIndividualReportPage = lazy(() => import("./views/marks-management/Faculty/StudentIndividualReportPage"));
 const FacultyConfigurationPage = lazy(() => import("./views/marks-management/Faculty/FacultyConfigurationPage"));
 
@@ -33,9 +32,9 @@ const AdminConfigurationpage = lazy(() => import("./views/marks-management/Admin
 
 // --- SUPER ADMIN IMPORTS ---
 const SuperAdminDashboard = lazy(() => import("./views/marks-management/SuperAdmin/SuperAdminDashboard"));
-const DepartmentAttainmentPage = lazy(() => import("./views/marks-management/SuperAdmin/DepartmentAttainmentPage"));
 const DepartmentManagement = lazy(() => import("./views/marks-management/SuperAdmin/DepartmentManagement"));
 const AdminManagement = lazy(() => import("./views/marks-management/SuperAdmin/AdminManagement"));
+const DepartmentAttainmentPage = lazy(() => import("./views/marks-management/SuperAdmin/DepartmentAttainmentPage"));
 
 const routes = [
   { path: "/", element: <Navigate to="/session/signin" /> },
@@ -55,9 +54,7 @@ const routes = [
       { path: "/faculty/copo-attainment", element: <CoPoAttainmentPage /> },
       { path: "/faculty/course-reports", element: <AttainmentReportPage /> },
       { path: "/faculty/student-reports", element: <StudentReportsPage /> },
-      // NEW ROUTE:
       { path: "/faculty/student-reports/:courseId/:studentId", element: <StudentIndividualReportPage /> },
-      
       { path: "/faculty/configuration", element: <FacultyConfigurationPage /> },
 
       // --- ADMIN ROUTES ---
@@ -73,11 +70,20 @@ const routes = [
       { path: "/admin/improvement-plans", element: <ImprovementActionsPage /> },
       { path: "/admin/configuration", element: <AdminConfigurationpage /> },
 
-      // --- SUPER ADMIN ROUTES ---
+      // --- SUPER ADMIN ROUTES (FIXED PATHS) ---
       { path: "/superadmin/dashboard", element: <SuperAdminDashboard /> },
-      { path: "/superadmin/departments", element: <DepartmentAttainmentPage /> },
-      {path: "/superadmin/DepartmentManagement", element: <DepartmentManagement />},
-      {path: "/superadmin/AdminManagement", element: <AdminManagement />}
+      
+      // FIXED: Matches the "Department Management" button path
+      { path: "/superadmin/departments", element: <DepartmentManagement /> },
+
+      // FIXED: Matches the "Admin Management" button path
+      { path: "/superadmin/admins", element: <AdminManagement /> },
+
+      // FIXED: Matches the "Department Attainment" button path
+      { path: "/superadmin/attainment", element: <DepartmentAttainmentPage /> },
+
+      // FIXED: Matches the "Reports" button path (Using Attainment page as placeholder)
+      { path: "/superadmin/reports", element: <DepartmentAttainmentPage /> }
     ]
   },
   

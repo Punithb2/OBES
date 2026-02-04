@@ -1,57 +1,69 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { users as mockUsers } from '../views/marks-management/data/mockData'; 
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import api from '../services/api';
 
-const AuthContext = createContext(undefined);
+const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  // 1. Initialize state from localStorage if available
-  const [user, setUser] = useState(() => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Check if user is already logged in when app loads
+  useEffect(() => {
+    const initAuth = async () => {
+        const token = localStorage.getItem('accessToken');
+        if (token) {
+            try {
+                // Verify token by fetching user details
+                const response = await api.get('/users/me/');
+                setUser(response.data);
+            } catch (error) {
+                console.error("Session expired", error);
+                logout();
+            }
+        }
+        setLoading(false);
+    };
+    initAuth();
+  }, []);
+
+  const login = async (email, password) => {
     try {
-      const savedUser = localStorage.getItem('user');
-      return savedUser ? JSON.parse(savedUser) : null;
-    } catch (error) {
-      console.error("Error parsing user from local storage", error);
-      return null;
-    }
-  });
+      // 1. Get the Token
+      const response = await api.post('/token/', { 
+        username: email, // Django expects 'username', not 'email'
+        password: password 
+      });
+      
+      const { access, refresh } = response.data;
+      localStorage.setItem('accessToken', access);
+      localStorage.setItem('refreshToken', refresh);
 
-  // 2. Login function: Accepts email, role, and the full user object
-  const login = (email, role, fullUserObject = null) => {
-    let userData = fullUserObject;
-
-    // Fallback: If full object wasn't passed, try to find it in mockData
-    if (!userData) {
-      userData = mockUsers.find(u => u.email === email && u.role === role);
-    }
-
-    if (userData) {
+      // 2. Get User Details (Role, Name, etc.)
+      const userResponse = await api.get('/users/me/');
+      const userData = userResponse.data;
+      
       setUser(userData);
-      localStorage.setItem('user', JSON.stringify(userData)); // Save to storage
-    } else {
-      console.error("Login failed: User not found or role mismatch");
+      return userData; // Return user to help with redirection
+      
+    } catch (error) {
+      console.error("Login failed:", error);
+      throw error;
     }
   };
 
-  // 3. Logout function: Clears state and localStorage
   const logout = () => {
+    // 1. Clear all auth data
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
     setUser(null);
-    localStorage.removeItem('user');
-    window.location.href = '/session/signin'; // Force redirect to login
+    window.location.href = '/'; 
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated: !!user, user, login, logout }}>
-      {children}
+    <AuthContext.Provider value={{ user, login, logout, loading }}>
+      {!loading && children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};
-
-export default AuthContext;
+export const useAuth = () => useContext(AuthContext);

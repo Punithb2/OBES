@@ -14,16 +14,17 @@ const DepartmentAttainmentPage = () => {
     const [config, setConfig] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    // 1. Fetch Initial Data (Departments, Outcomes, Global Config, Full Matrix)
+    // 1. Fetch Initial Data
     useEffect(() => {
         const fetchGlobals = async () => {
             try {
+                // FIXED: Trailing slashes added to all calls
                 const [deptRes, posRes, psosRes, matrixRes, configRes] = await Promise.all([
-                    api.get('/departments'),
-                    api.get('/pos'),
-                    api.get('/psos'),
-                    api.get('/articulationMatrix'),
-                    api.get('/configurations/global')
+                    api.get('/departments/'),
+                    api.get('/pos/').catch(() => ({ data: [] })), // Graceful fallback
+                    api.get('/psos/').catch(() => ({ data: [] })),
+                    api.get('/articulationMatrix/').catch(() => ({ data: {} })),
+                    api.get('/configurations/global/').catch(() => ({ data: {} }))
                 ]);
 
                 setDepartments(deptRes.data);
@@ -41,20 +42,20 @@ const DepartmentAttainmentPage = () => {
         fetchGlobals();
     }, []);
 
-    // 2. Fetch Department Specific Data (Courses, Survey) when selection changes
+    // 2. Fetch Department Specific Data
     useEffect(() => {
         const fetchDeptData = async () => {
             if (!selectedDepartmentId) return;
             
             setLoading(true);
             try {
-                // Fetch courses for this department
-                const coursesRes = await api.get(`/courses?departmentId=${selectedDepartmentId}`);
+                // FIXED: Slash before query param
+                const coursesRes = await api.get(`/courses/?departmentId=${selectedDepartmentId}`);
                 setCourses(coursesRes.data);
 
-                // Fetch survey data for this department (handle 404 if missing)
                 try {
-                    const surveyRes = await api.get(`/surveys/${selectedDepartmentId}`);
+                    // FIXED: Trailing slash
+                    const surveyRes = await api.get(`/surveys/${selectedDepartmentId}/`);
                     setSurveyData(surveyRes.data);
                 } catch (err) {
                     setSurveyData({ exitSurvey: {}, employerSurvey: {}, alumniSurvey: {} });
@@ -74,10 +75,9 @@ const DepartmentAttainmentPage = () => {
     const attainmentData = useMemo(() => {
         if (!courses.length || !outcomes.length) return null;
 
-        // A. Calculate Direct Attainment (Average of CO-PO mappings for dept courses)
         const calculateCourseAverage = (course) => {
             const courseMatrix = matrix[course.id];
-            if (!courseMatrix) return {}; // Skip courses without mapping
+            if (!courseMatrix) return {}; 
 
             const averages = {};
             outcomes.forEach(outcome => {
@@ -113,7 +113,6 @@ const DepartmentAttainmentPage = () => {
             if (count > 0) averageData[outcome.id] = sum / count;
         });
 
-        // B. Prepare Indirect Attainment (Surveys)
         const exitData = surveyData.exitSurvey || {};
         const employerData = surveyData.employerSurvey || {};
         const alumniData = surveyData.alumniSurvey || {};
@@ -130,7 +129,6 @@ const DepartmentAttainmentPage = () => {
             indirectAttainment[outcome.id] = divisor > 0 ? total / divisor : 0;
         });
 
-        // C. Final Calculation using Config Weights
         const directWeight = (config?.attainmentRules?.finalWeightage?.direct || 80) / 100;
         const indirectWeight = (config?.attainmentRules?.finalWeightage?.indirect || 20) / 100;
 
@@ -245,7 +243,6 @@ const DepartmentAttainmentPage = () => {
                                             </td>
                                             {attainmentData.allOutcomes.map(outcome => {
                                                 const value = row.data[outcome.id];
-                                                // Formatting logic
                                                 let displayValue = '-';
                                                 if (typeof value === 'number') displayValue = value.toFixed(2);
                                                 else if (value && !isNaN(parseFloat(value))) displayValue = parseFloat(value).toFixed(2);

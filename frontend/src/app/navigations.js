@@ -1,4 +1,4 @@
-// Default navigations for the base template (optional, can be removed if not used)
+// Default navigations for the base template
 export const navigations = [
   { name: "Dashboard", path: "/dashboard/default", icon: "dashboard" }
 ];
@@ -11,9 +11,7 @@ export const facultyNavigations = [
   { name: "Marks Entry", path: "/faculty/marks", icon: "edit" },
   { name: "Indirect CO", path: "/faculty/indirect-co", icon: "description" },
   { name: "CO-PO Attainment", path: "/faculty/copo-attainment", icon: "track_changes" },
-  // Renamed & Updated path for clarity
   { name: "Course Reports", path: "/faculty/course-reports", icon: "assessment" }, 
-  // Added Student Reports
   { name: "Student Reports", path: "/faculty/student-reports", icon: "people" }, 
   { name: "Configuration", path: "/faculty/configuration", icon: "settings" }
 ];
@@ -31,16 +29,14 @@ export const adminNavigations = [
   { name: "Evaluation Result", path: "/admin/evaluation-result", icon: "assessment" },
   { name: "Indirect Attainment", path: "/admin/indirect-attainment", icon: "description" },
   { name: "Improvement Plans", path: "/admin/improvement-plans", icon: "build" },
-  { name: "AdminConfigurationpage", path: "/admin/configuration", icon: "settings" },
+  { name: "Configuration", path: "/admin/configuration", icon: "settings" },
 ];
 
-// Navigation items for SUPER ADMIN role
+// Navigation items for SUPER ADMIN role (FIXED PATHS)
 export const superAdminNavigations = [
   { label: "Super Admin", type: "label" },
   { name: "Dashboard", path: "/superadmin/dashboard", icon: "dashboard" },
-  { name: "Department Attainment", path: "/superadmin/departments", icon: "business" },
-  { name: "Manage Departments", path: "/superadmin/DepartmentManagement", icon: "domain" },
-  { name: "Manage Admin", path: "/superadmin/AdminManagement", icon: "book" },
-  // Add 'Admins' if you have created a route and component for it
-  // { name: "Manage Admins", path: "/superadmin/admins", icon: "supervisor_account" }, 
+  { name: "Department Attainment", path: "/superadmin/attainment", icon: "bar_chart" },
+  { name: "Manage Departments", path: "/superadmin/departments", icon: "domain" },
+  { name: "Manage Admin", path: "/superadmin/admins", icon: "supervisor_account" }, 
 ];

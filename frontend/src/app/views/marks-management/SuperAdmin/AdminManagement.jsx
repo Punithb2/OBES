@@ -9,7 +9,7 @@ const AdminModal = ({ isOpen, onClose, onSave, admin = null, departments = [] })
 
     useEffect(() => {
         if (admin) {
-            setFormData({ name: admin.name, email: admin.email, departmentId: admin.departmentId });
+            setFormData({ name: admin.name || admin.display_name || '', email: admin.email, departmentId: admin.department });
         } else {
             setFormData({ name: '', email: '', departmentId: departments[0]?.id || '' });
         }
@@ -68,9 +68,10 @@ const AdminManagement = () => {
     const fetchData = async () => {
         try {
             setLoading(true);
+            // FIXED: Added trailing slashes
             const [usersRes, deptRes] = await Promise.all([
-                api.get('/users?role=admin'),
-                api.get('/departments')
+                api.get('/users/?role=admin'), // Slash goes before query param
+                api.get('/departments/')
             ]);
             setAdmins(usersRes.data);
             setDepartments(deptRes.data);
@@ -84,12 +85,22 @@ const AdminManagement = () => {
     useEffect(() => { fetchData(); }, []);
 
     const handleSave = async (data) => {
-        const payload = { ...data, role: 'admin' };
+        // Map form data to Django serializer fields
+        const payload = { 
+            username: data.email,
+            email: data.email,
+            display_name: data.name,
+            role: 'admin',
+            department: data.departmentId
+        };
+        
         try {
             if (modal.admin) {
-                await api.patch(`/users/${modal.admin.id}`, payload);
+                // FIXED: Added trailing slash
+                await api.patch(`/users/${modal.admin.id}/`, payload);
             } else {
-                await api.post('/users', { ...payload, id: `U${Date.now()}` });
+                // FIXED: Added trailing slash
+                await api.post('/users/', { ...payload, password: 'password123' }); // Set default password
             }
             setModal({ isOpen: false, admin: null });
             fetchData();
@@ -100,7 +111,11 @@ const AdminManagement = () => {
 
     const handleDelete = async (id) => {
         if(window.confirm("Delete this admin?")) {
-            try { await api.delete(`/users/${id}`); fetchData(); } 
+            try { 
+                // FIXED: Added trailing slash
+                await api.delete(`/users/${id}/`); 
+                fetchData(); 
+            } 
             catch (error) { console.error(error); }
         }
     };
@@ -140,9 +155,9 @@ const AdminManagement = () => {
                             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                 {admins.map(admin => (
                                     <tr key={admin.id}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{admin.name}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{admin.display_name || admin.username}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{admin.email}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{getDeptName(admin.departmentId)}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{getDeptName(admin.department)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <button onClick={() => setModal({ isOpen: true, admin })} className="text-primary-600 hover:text-primary-800 dark:text-primary-400 mr-4">Edit</button>
                                             <button onClick={() => handleDelete(admin.id)} className="text-red-600 hover:text-red-800 dark:text-red-400">Delete</button>
