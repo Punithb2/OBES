@@ -1,0 +1,1758 @@
+{
+  "departments": [
+    {
+      "id": "D01",
+      "name": "Computer Science & Engineering"
+    },
+    {
+      "id": "D02",
+      "name": "Electronics & Communication Engineering"
+    },
+    {
+      "id": "D03",
+      "name": "Mechanical Engineering"
+    },
+    {
+      "id": "D04",
+      "name": "Artificial Intelligence & Data Science"
+    },
+    {
+      "id": "343",
+      "name": "mech"
+    }
+  ],
+  "users": [
+    {
+      "id": "U001",
+      "name": "Super Admin",
+      "email": "superadmin@obe.com",
+      "role": "superadmin",
+      "departmentId": null
+    },
+    {
+      "id": "U002",
+      "name": "Dr. Alan Turing",
+      "email": "admin@obe.com",
+      "role": "admin",
+      "departmentId": "D01"
+    },
+    {
+      "id": "U003",
+      "name": "Prof. Ada Lovelace",
+      "email": "faculty@obe.com",
+      "role": "faculty",
+      "departmentId": "D01"
+    },
+    {
+      "id": "U004",
+      "name": "Dr. Grace Hopper",
+      "email": "faculty2@obe.com",
+      "role": "faculty",
+      "departmentId": "D01"
+    },
+    {
+      "id": "U005",
+      "name": "Dr. Maxwell",
+      "email": "eceadmin@obe.com",
+      "role": "admin",
+      "departmentId": "D02"
+    },
+    {
+      "id": "U006",
+      "name": "Prof. Donald Knuth",
+      "email": "faculty3@obe.com",
+      "role": "faculty",
+      "departmentId": "D01"
+    },
+    {
+      "id": "U007",
+      "name": "Prof. Vint Cerf",
+      "email": "faculty4@obe.com",
+      "role": "faculty",
+      "departmentId": "D01"
+    },
+    {
+      "id": "U008",
+      "name": "Prof. Tim Berners-Lee",
+      "email": "faculty5@obe.com",
+      "role": "faculty",
+      "departmentId": "D01"
+    },
+    {
+      "id": "U009",
+      "name": "Prof. Heinrich Hertz",
+      "email": "hertz@obe.com",
+      "role": "faculty",
+      "departmentId": "D02"
+    },
+    {
+      "id": "U010",
+      "name": "Prof. Guglielmo Marconi",
+      "email": "marconi@obe.com",
+      "role": "faculty",
+      "departmentId": "D02"
+    },
+    {
+      "id": "U011",
+      "name": "Dr. Isaac Newton",
+      "email": "mechadmin@obe.com",
+      "role": "admin",
+      "departmentId": "D03"
+    },
+    {
+      "id": "U012",
+      "name": "Prof. James Watt",
+      "email": "watt@obe.com",
+      "role": "faculty",
+      "departmentId": "D03"
+    },
+    {
+      "id": "U013",
+      "name": "Dr. John McCarthy",
+      "email": "aiadmin@obe.com",
+      "role": "admin",
+      "departmentId": "D04"
+    },
+    {
+      "id": "U014",
+      "name": "Prof. Geoffrey Hinton",
+      "email": "hinton@obe.com",
+      "role": "faculty",
+      "departmentId": "D04"
+    },
+    {
+      "id": "U1765015812927",
+      "name": "Punith B",
+      "email": "punithb165@gmail.com",
+      "role": "faculty",
+      "departmentId": "D01"
+    },
+    {
+      "id": "U1765028462890",
+      "name": "Mohith",
+      "email": "mohit@gmail.com",
+      "role": "faculty",
+      "departmentId": "D01"
+    },
+    {
+      "id": "U1765030097060",
+      "name": "Punith",
+      "email": "punithb165_admin@gmail.com",
+      "departmentId": "D01",
+      "role": "admin"
+    },
+    {
+      "id": "U1765092247083",
+      "name": "hanumanth",
+      "email": "hanu@gmail.com",
+      "role": "faculty",
+      "departmentId": "D01"
+    }
+  ],
+  "courses": [
+    {
+      "id": "C101",
+      "code": "CS101",
+      "name": "Introduction to Programming",
+      "semester": 1,
+      "credits": 4,
+      "departmentId": "D01",
+      "assignedFacultyId": "U003",
+      "cos": [
+        {
+          "id": "CO1",
+          "description": "Understand basic programming concepts",
+          "modules": "Module 1",
+          "kLevel": "K2"
+        },
+        {
+          "id": "CO2",
+          "description": "Apply control structures",
+          "modules": "Module 2",
+          "kLevel": "K3"
+        },
+        {
+          "id": "CO3",
+          "description": "Analyze arrays and strings",
+          "modules": "Module 3",
+          "kLevel": "K4"
+        },
+        {
+          "id": "CO4",
+          "description": "Design functions and pointers",
+          "modules": "Module 4",
+          "kLevel": "K6"
+        },
+        {
+          "id": "CO5",
+          "description": "Evaluate file handling mechanisms",
+          "modules": "Module 5",
+          "kLevel": "K5"
+        }
+      ],
+      "settings": {
+        "targetThreshold": 60,
+        "courseType": "Theory"
+      },
+      "assessmentTools": [
+        {
+          "id": "1",
+          "name": "Internal Assessment 1",
+          "maxMarks": 30,
+          "weightage": 15,
+          "coDistribution": {
+            "CO1": 15,
+            "CO2": 15
+          }
+        },
+        {
+          "id": "2",
+          "name": "Internal Assessment 2",
+          "maxMarks": 30,
+          "weightage": 15,
+          "coDistribution": {
+            "CO3": 15,
+            "CO4": 15
+          }
+        },
+        {
+          "id": "3",
+          "name": "Assignment 1",
+          "maxMarks": 10,
+          "weightage": 10,
+          "coDistribution": {
+            "CO1": 5,
+            "CO2": 5
+          }
+        }
+      ]
+    },
+    {
+      "id": "C102",
+      "code": "CS102",
+      "name": "Digital Logic Design",
+      "semester": 1,
+      "credits": 4,
+      "departmentId": "D01",
+      "assignedFacultyId": "U003"
+    },
+    {
+      "id": "C001",
+      "code": "CS103",
+      "name": "Data Structures and Algorithms",
+      "semester": 1,
+      "credits": 4,
+      "departmentId": "D01",
+      "assignedFacultyId": "U003"
+    },
+    {
+      "id": "C002",
+      "code": "CS201",
+      "name": "Database Management Systems",
+      "semester": 2,
+      "credits": 3,
+      "departmentId": "D01",
+      "assignedFacultyId": "U006"
+    },
+    {
+      "id": "C003",
+      "code": "CS202",
+      "name": "Operating Systems",
+      "semester": 2,
+      "credits": 3,
+      "departmentId": "D01",
+      "assignedFacultyId": "U007"
+    },
+    {
+      "id": "C004",
+      "code": "CS301",
+      "name": "Computer Networks",
+      "semester": 3,
+      "credits": 4,
+      "departmentId": "D01",
+      "assignedFacultyId": "U008"
+    },
+    {
+      "id": "C1765016202420",
+      "code": "CS401",
+      "name": "Parallel Computing",
+      "semester": 4,
+      "credits": 4,
+      "cos": [],
+      "departmentId": "D01",
+      "assignedFacultyId": "U1765015812927"
+    },
+    {
+      "id": "C1765028522247",
+      "code": "CS501",
+      "name": "Internet of Things",
+      "semester": 5,
+      "credits": 4,
+      "cos": [],
+      "departmentId": "D01",
+      "assignedFacultyId": "U1765028462890"
+    },
+    {
+      "id": "EC201",
+      "code": "EC201",
+      "name": "Analog Electronic Circuits",
+      "semester": 2,
+      "credits": 4,
+      "departmentId": "D02",
+      "assignedFacultyId": "U009"
+    },
+    {
+      "id": "EC202",
+      "code": "EC202",
+      "name": "Digital Signal Processing",
+      "semester": 4,
+      "credits": 4,
+      "departmentId": "D02",
+      "assignedFacultyId": "U010"
+    },
+    {
+      "id": "EC203",
+      "code": "EC203",
+      "name": "Microcontrollers",
+      "semester": 3,
+      "credits": 3,
+      "departmentId": "D02",
+      "assignedFacultyId": "U009"
+    },
+    {
+      "id": "ME301",
+      "code": "ME301",
+      "name": "Thermodynamics",
+      "semester": 3,
+      "credits": 4,
+      "departmentId": "D03",
+      "assignedFacultyId": "U012"
+    },
+    {
+      "id": "ME302",
+      "code": "ME302",
+      "name": "Fluid Mechanics",
+      "semester": 3,
+      "credits": 4,
+      "departmentId": "D03",
+      "assignedFacultyId": "U012"
+    },
+    {
+      "id": "AI401",
+      "code": "AI401",
+      "name": "Principles of AI",
+      "semester": 3,
+      "credits": 4,
+      "departmentId": "D04",
+      "assignedFacultyId": "U014"
+    },
+    {
+      "id": "AI402",
+      "code": "AI402",
+      "name": "Machine Learning",
+      "semester": 4,
+      "credits": 4,
+      "departmentId": "D04",
+      "assignedFacultyId": "U014"
+    }
+  ],
+  "students": [
+    {
+      "id": "S101",
+      "name": "Alice Johnson",
+      "usn": "1CR23CS001",
+      "courseId": "C101"
+    },
+    {
+      "id": "S102",
+      "name": "Bob Smith",
+      "usn": "1CR23CS002",
+      "courseId": "C101"
+    },
+    {
+      "id": "S103",
+      "name": "Charlie Brown",
+      "usn": "1CR23CS003",
+      "courseId": "C101"
+    },
+    {
+      "id": "S104",
+      "name": "Daisy Miller",
+      "usn": "1CR23CS004",
+      "courseId": "C101"
+    },
+    {
+      "id": "S105",
+      "name": "Ethan Hunt",
+      "usn": "1CR23CS005",
+      "courseId": "C101"
+    },
+    {
+      "id": "S106",
+      "name": "Fiona Gallagher",
+      "usn": "1CR23CS006",
+      "courseId": "C102"
+    },
+    {
+      "id": "S107",
+      "name": "George Martin",
+      "usn": "1CR23CS007",
+      "courseId": "C102"
+    },
+    {
+      "id": "S108",
+      "name": "Hannah Montana",
+      "usn": "1CR23CS008",
+      "courseId": "C102"
+    },
+    {
+      "id": "S109",
+      "name": "Ian Somerhalder",
+      "usn": "1CR23CS009",
+      "courseId": "C102"
+    },
+    {
+      "id": "S110",
+      "name": "Julia Roberts",
+      "usn": "1CR23CS010",
+      "courseId": "C102"
+    },
+    {
+      "id": "S201",
+      "name": "Frank Castle",
+      "usn": "1CR23CS021",
+      "courseId": "C001"
+    },
+    {
+      "id": "S202",
+      "name": "Gwen Stacy",
+      "usn": "1CR23CS022",
+      "courseId": "C001"
+    },
+    {
+      "id": "S203",
+      "name": "Harry Potter",
+      "usn": "1CR23CS023",
+      "courseId": "C001"
+    },
+    {
+      "id": "S204",
+      "name": "Iris West",
+      "usn": "1CR23CS024",
+      "courseId": "C001"
+    },
+    {
+      "id": "S205",
+      "name": "Jack Reacher",
+      "usn": "1CR23CS025",
+      "courseId": "C001"
+    },
+    {
+      "id": "S301",
+      "name": "Kyle Reese",
+      "usn": "1CR23EC001",
+      "courseId": "EC201"
+    },
+    {
+      "id": "S302",
+      "name": "Lara Croft",
+      "usn": "1CR23EC002",
+      "courseId": "EC201"
+    },
+    {
+      "id": "S303",
+      "name": "Mario Bros",
+      "usn": "1CR23EC003",
+      "courseId": "EC201"
+    },
+    {
+      "id": "S401",
+      "name": "Nathan Drake",
+      "usn": "1CR23CS041",
+      "courseId": "C004"
+    },
+    {
+      "id": "S402",
+      "name": "Olivia Pope",
+      "usn": "1CR23CS042",
+      "courseId": "C004"
+    },
+    {
+      "id": "S403",
+      "name": "Peter Parker",
+      "usn": "1CR23CS043",
+      "courseId": "C004"
+    },
+    {
+      "id": "S404",
+      "name": "Quinn Fabray",
+      "usn": "1CR23CS044",
+      "courseId": "C004"
+    },
+    {
+      "id": "S405",
+      "name": "Rachel Green",
+      "usn": "1CR23CS045",
+      "courseId": "C004"
+    },
+    {
+      "id": "S501",
+      "name": "Tony Stark",
+      "usn": "1CR23ME001",
+      "courseId": "ME301"
+    },
+    {
+      "id": "S502",
+      "name": "Bruce Wayne",
+      "usn": "1CR23ME002",
+      "courseId": "ME301"
+    },
+    {
+      "id": "S503",
+      "name": "Clark Kent",
+      "usn": "1CR23ME003",
+      "courseId": "ME301"
+    },
+    {
+      "id": "S504",
+      "name": "Diana Prince",
+      "usn": "1CR23ME004",
+      "courseId": "ME301"
+    },
+    {
+      "id": "S505",
+      "name": "Barry Allen",
+      "usn": "1CR23ME005",
+      "courseId": "ME301"
+    }
+  ],
+  "marks": [
+    {
+      "id": "M_C101_S101_IA1",
+      "studentId": "S101",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 12,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_C101_S102_IA1",
+      "studentId": "S102",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 14,
+        "Part B": 13
+      }
+    },
+    {
+      "id": "M_C101_S103_IA1",
+      "studentId": "S103",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 10,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C101_S104_IA1",
+      "studentId": "S104",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 15,
+        "Part B": 14
+      }
+    },
+    {
+      "id": "M_C101_S105_IA1",
+      "studentId": "S105",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 8,
+        "Part B": 11
+      }
+    },
+    {
+      "id": "M_C101_S101_IA2",
+      "studentId": "S101",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 2",
+      "scores": {
+        "Part A": 13,
+        "Part B": 11
+      }
+    },
+    {
+      "id": "M_C101_S102_IA2",
+      "studentId": "S102",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 2",
+      "scores": {
+        "Part A": 15,
+        "Part B": 14
+      }
+    },
+    {
+      "id": "M_C101_S103_IA2",
+      "studentId": "S103",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 2",
+      "scores": {
+        "Part A": 11,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_C101_S101_ASN1",
+      "studentId": "S101",
+      "courseId": "C101",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 9,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C101_S102_ASN1",
+      "studentId": "S102",
+      "courseId": "C101",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 10,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C102_S106_IA1",
+      "studentId": "S106",
+      "courseId": "C102",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 14,
+        "Part B": 12
+      }
+    },
+    {
+      "id": "M_C102_S107_IA1",
+      "studentId": "S107",
+      "courseId": "C102",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 10,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_C102_S108_IA1",
+      "studentId": "S108",
+      "courseId": "C102",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 15,
+        "Part B": 15
+      }
+    },
+    {
+      "id": "M_C102_S109_IA1",
+      "studentId": "S109",
+      "courseId": "C102",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 8,
+        "Part B": 7
+      }
+    },
+    {
+      "id": "M_C102_S110_IA1",
+      "studentId": "S110",
+      "courseId": "C102",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 13,
+        "Part B": 14
+      }
+    },
+    {
+      "id": "M_C001_S202_IA2",
+      "studentId": "S202",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 2",
+      "scores": {
+        "Part A": 13,
+        "Part B": 14
+      }
+    },
+    {
+      "id": "M_C001_S203_IA2",
+      "studentId": "S203",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 2",
+      "scores": {
+        "Part A": 15,
+        "Part B": 14
+      }
+    },
+    {
+      "id": "M_C001_S204_IA2",
+      "studentId": "S204",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 2",
+      "scores": {
+        "Part A": 11,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_C001_S205_IA2",
+      "studentId": "S205",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 2",
+      "scores": {
+        "Part A": 12,
+        "Part B": 13
+      }
+    },
+    {
+      "id": "M_C001_S201_IA3",
+      "studentId": "S201",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 14,
+        "Part B": 13
+      }
+    },
+    {
+      "id": "M_C001_S202_IA3",
+      "studentId": "S202",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 12,
+        "Part B": 14
+      }
+    },
+    {
+      "id": "M_C001_S203_IA3",
+      "studentId": "S203",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 15,
+        "Part B": 15
+      }
+    },
+    {
+      "id": "M_C001_S204_IA3",
+      "studentId": "S204",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 10,
+        "Part B": 11
+      }
+    },
+    {
+      "id": "M_C001_S205_IA3",
+      "studentId": "S205",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 13,
+        "Part B": 12
+      }
+    },
+    {
+      "id": "M_C001_S201_ASN1",
+      "studentId": "S201",
+      "courseId": "C001",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 9,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C001_S202_ASN1",
+      "studentId": "S202",
+      "courseId": "C001",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 10,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C001_S203_ASN1",
+      "studentId": "S203",
+      "courseId": "C001",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 10,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_C001_S204_ASN1",
+      "studentId": "S204",
+      "courseId": "C001",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 8,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C001_S205_ASN1",
+      "studentId": "S205",
+      "courseId": "C001",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 9,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C001_S201_ASN2",
+      "studentId": "S201",
+      "courseId": "C001",
+      "assessment": "Assignment 2",
+      "scores": {
+        "Part A": 9,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C001_S202_ASN2",
+      "studentId": "S202",
+      "courseId": "C001",
+      "assessment": "Assignment 2",
+      "scores": {
+        "Part A": 9,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C001_S203_ASN2",
+      "studentId": "S203",
+      "courseId": "C001",
+      "assessment": "Assignment 2",
+      "scores": {
+        "Part A": 10,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_C001_S204_ASN2",
+      "studentId": "S204",
+      "courseId": "C001",
+      "assessment": "Assignment 2",
+      "scores": {
+        "Part A": 8,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C001_S205_ASN2",
+      "studentId": "S205",
+      "courseId": "C001",
+      "assessment": "Assignment 2",
+      "scores": {
+        "Part A": 9,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C001_S201_ASN3",
+      "studentId": "S201",
+      "courseId": "C001",
+      "assessment": "Assignment 3",
+      "scores": {
+        "Part A": 8,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C001_S202_ASN3",
+      "studentId": "S202",
+      "courseId": "C001",
+      "assessment": "Assignment 3",
+      "scores": {
+        "Part A": 10,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C001_S203_ASN3",
+      "studentId": "S203",
+      "courseId": "C001",
+      "assessment": "Assignment 3",
+      "scores": {
+        "Part A": 10,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_C001_S204_ASN3",
+      "studentId": "S204",
+      "courseId": "C001",
+      "assessment": "Assignment 3",
+      "scores": {
+        "Part A": 7,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C001_S205_ASN3",
+      "studentId": "S205",
+      "courseId": "C001",
+      "assessment": "Assignment 3",
+      "scores": {
+        "Part A": 9,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C001_S201_SEE",
+      "studentId": "S201",
+      "courseId": "C001",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 82
+      }
+    },
+    {
+      "id": "M_C001_S202_SEE",
+      "studentId": "S202",
+      "courseId": "C001",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 88
+      }
+    },
+    {
+      "id": "M_C001_S203_SEE",
+      "studentId": "S203",
+      "courseId": "C001",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 95
+      }
+    },
+    {
+      "id": "M_C001_S204_SEE",
+      "studentId": "S204",
+      "courseId": "C001",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 70
+      }
+    },
+    {
+      "id": "M_C001_S205_SEE",
+      "studentId": "S205",
+      "courseId": "C001",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 85
+      }
+    },
+    {
+      "id": "M_C001_S201_IA2",
+      "studentId": "S201",
+      "courseId": "C001",
+      "assessment": "Internal Assessment 2",
+      "scores": {
+        "Part A": 10,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C004_S401_IA1",
+      "studentId": "S401",
+      "courseId": "C004",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 12,
+        "Part B": 13
+      }
+    },
+    {
+      "id": "M_C004_S402_IA1",
+      "studentId": "S402",
+      "courseId": "C004",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 14,
+        "Part B": 14
+      }
+    },
+    {
+      "id": "M_C004_S403_IA1",
+      "studentId": "S403",
+      "courseId": "C004",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 11,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_ME301_S501_IA1",
+      "studentId": "S501",
+      "courseId": "ME301",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 13,
+        "Part B": 12
+      }
+    },
+    {
+      "id": "M_ME301_S502_IA1",
+      "studentId": "S502",
+      "courseId": "ME301",
+      "assessment": "Internal Assessment 1",
+      "scores": {
+        "Part A": 15,
+        "Part B": 15
+      }
+    },
+    {
+      "id": "M_C101_S101_InternalAssessment3",
+      "studentId": "S101",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 11,
+        "Part B": 13
+      }
+    },
+    {
+      "id": "M_C101_S102_InternalAssessment3",
+      "studentId": "S102",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 14,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C101_S103_InternalAssessment3",
+      "studentId": "S103",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 9,
+        "Part B": 12
+      }
+    },
+    {
+      "id": "M_C101_S104_InternalAssessment3",
+      "studentId": "S104",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 15,
+        "Part B": 11
+      }
+    },
+    {
+      "id": "M_C101_S105_InternalAssessment3",
+      "studentId": "S105",
+      "courseId": "C101",
+      "assessment": "Internal Assessment 3",
+      "scores": {
+        "Part A": 6,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C101_S103_Assignment1",
+      "studentId": "S103",
+      "courseId": "C101",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 8,
+        "Part B": 10
+      }
+    },
+    {
+      "id": "M_C101_S104_Assignment1",
+      "studentId": "S104",
+      "courseId": "C101",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 9,
+        "Part B": 8
+      }
+    },
+    {
+      "id": "M_C101_S105_Assignment1",
+      "studentId": "S105",
+      "courseId": "C101",
+      "assessment": "Assignment 1",
+      "scores": {
+        "Part A": 10,
+        "Part B": 9
+      }
+    },
+    {
+      "id": "M_C101_S101_SemesterEndExam",
+      "studentId": "S101",
+      "courseId": "C101",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 74
+      }
+    },
+    {
+      "id": "M_C101_S102_SemesterEndExam",
+      "studentId": "S102",
+      "courseId": "C101",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 85
+      }
+    },
+    {
+      "id": "M_C101_S103_SemesterEndExam",
+      "studentId": "S103",
+      "courseId": "C101",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 88
+      }
+    },
+    {
+      "id": "M_C101_S104_SemesterEndExam",
+      "studentId": "S104",
+      "courseId": "C101",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 69
+      }
+    },
+    {
+      "id": "M_C101_S105_SemesterEndExam",
+      "studentId": "S105",
+      "courseId": "C101",
+      "assessment": "Semester End Exam",
+      "scores": {
+        "external": 81
+      }
+    }
+  ],
+  "pos": [
+    {
+      "id": "PO1",
+      "description": "Engineering knowledge"
+    },
+    {
+      "id": "PO2",
+      "description": "Problem analysis"
+    },
+    {
+      "id": "PO3",
+      "description": "Design/development of solutions"
+    },
+    {
+      "id": "PO4",
+      "description": "Conduct investigations of complex problems"
+    },
+    {
+      "id": "PO5",
+      "description": "Modern tool usage"
+    },
+    {
+      "id": "PO6",
+      "description": "The engineer and society"
+    },
+    {
+      "id": "PO7",
+      "description": "Environment and sustainability"
+    },
+    {
+      "id": "PO8",
+      "description": "Ethics"
+    },
+    {
+      "id": "PO9",
+      "description": "Individual and team work"
+    },
+    {
+      "id": "PO10",
+      "description": "Communication"
+    },
+    {
+      "id": "PO11",
+      "description": "Project management and finance"
+    },
+    {
+      "id": "PO12",
+      "description": "Life-long learning"
+    }
+  ],
+  "psos": [
+    {
+      "id": "PSO1",
+      "description": "Analyze and develop computer programs in the areas related to algorithms, system software, multimedia, web design, big data analytics, and networking."
+    },
+    {
+      "id": "PSO2",
+      "description": "Apply standard practices and strategies in software project development using open-ended programming environments."
+    }
+  ],
+  "configurations": [
+    {
+      "id": "global",
+      "attainmentRules": {
+        "studentPassThreshold": 50,
+        "maxAttainmentLevel": 3,
+        "levelThresholds": {
+          "level3": 70,
+          "level2": 60,
+          "level1": 50
+        },
+        "finalWeightage": {
+          "direct": 90,
+          "indirect": 10
+        },
+        "directSplit": {
+          "cie": 50,
+          "see": 50
+        }
+      },
+      "indirectTools": [
+        {
+          "id": "exit",
+          "name": "Program Exit Survey",
+          "weight": 40
+        },
+        {
+          "id": "alumni",
+          "name": "Alumni Survey",
+          "weight": 30
+        },
+        {
+          "id": "employer",
+          "name": "Employer Survey",
+          "weight": 30
+        }
+      ]
+    }
+  ],
+  "surveys": [
+    {
+      "id": "D01",
+      "exitSurvey": {
+        "PO1": 3,
+        "PO2": 2.1,
+        "PO3": 2.4,
+        "PO4": 1.5,
+        "PO5": 1.6,
+        "PO6": 2.2,
+        "PO7": 2.8,
+        "PO8": 2.7,
+        "PO9": 1.4,
+        "PO10": 1.6,
+        "PO11": 1.8,
+        "PO12": 2.4,
+        "PSO1": 2.5,
+        "PSO2": 2.7
+      },
+      "employerSurvey": {
+        "PO1": 2.4,
+        "PO2": 2.3
+      },
+      "alumniSurvey": {}
+    },
+    {
+      "id": "D02",
+      "exitSurvey": {
+        "PO1": 2.8,
+        "PO2": 2.5,
+        "PO3": 2.2,
+        "PO4": 2,
+        "PO5": 3
+      },
+      "employerSurvey": {
+        "PO1": 3
+      },
+      "alumniSurvey": {
+        "PO1": 2.5,
+        "PO5": 3
+      }
+    },
+    {
+      "id": "D03",
+      "exitSurvey": {
+        "PO1": 2.5,
+        "PO2": 2.2,
+        "PO3": 2,
+        "PO6": 2.8,
+        "PO7": 3
+      },
+      "employerSurvey": {
+        "PO1": 2.5
+      },
+      "alumniSurvey": {}
+    },
+    {
+      "id": "D04",
+      "exitSurvey": {
+        "PO1": 2.9,
+        "PO2": 2.8,
+        "PO3": 2.9,
+        "PO5": 3,
+        "PO12": 2.8
+      },
+      "employerSurvey": {
+        "PO1": 2.8,
+        "PO5": 3
+      },
+      "alumniSurvey": {
+        "PO1": 2.7
+      }
+    }
+  ],
+  "articulationMatrix": {
+    "C101": {
+      "C101.1": {
+        "PO1": 3,
+        "PO2": 2,
+        "PO4": 3,
+        "PO5": 2,
+        "PO7": 1,
+        "PO8": 2,
+        "PO11": 1,
+        "PO12": 2,
+        "PSO1": 1
+      },
+      "C101.2": {
+        "PO1": 2,
+        "PO2": 3,
+        "PO4": 2,
+        "PO3": 3,
+        "PO6": 3,
+        "PO8": 2,
+        "PO11": 3,
+        "PO12": 2,
+        "PSO1": 2,
+        "PSO2": 1
+      },
+      "C101.3": {
+        "PO2": 3,
+        "PO3": 2,
+        "PO4": 2,
+        "PO5": 3,
+        "PO9": 2,
+        "PO10": 2,
+        "PO11": 2,
+        "PSO1": 2,
+        "PSO2": 1
+      },
+      "C101.4": {
+        "PO1": 3,
+        "PO2": 2,
+        "PO3": 3,
+        "PO4": 2,
+        "PO5": 2,
+        "PO10": 1,
+        "PSO1": 2,
+        "PSO2": 2
+      },
+      "C101.5": {
+        "PO1": 2,
+        "PO2": 3,
+        "PO3": 2,
+        "PO5": 2,
+        "PO9": 1,
+        "PO10": 2,
+        "PO11": 2,
+        "PO12": 1,
+        "PSO2": 3
+      }
+    },
+    "C102": {
+      "C102.1": {
+        "PO1": 3,
+        "PO2": 3,
+        "PO4": 2,
+        "PO5": 2,
+        "PO9": 2,
+        "PO10": 2,
+        "PO11": 1,
+        "PO12": 2,
+        "PSO1": 1
+      },
+      "C102.2": {
+        "PO2": 2,
+        "PO3": 2,
+        "PO4": 3,
+        "PO6": 2,
+        "PO8": 2,
+        "PO11": 3,
+        "PO12": 2,
+        "PSO1": 2,
+        "PSO2": 1
+      },
+      "C102.3": {
+        "PO1": 2,
+        "PO2": 3,
+        "PO3": 3,
+        "PO5": 2,
+        "PO7": 3,
+        "PO9": 2,
+        "PO10": 2,
+        "PO11": 2,
+        "PSO1": 2,
+        "PSO2": 1
+      },
+      "C102.4": {
+        "PO2": 2,
+        "PO3": 2,
+        "PO4": 1,
+        "PO5": 3,
+        "PO7": 2,
+        "PO9": 2,
+        "PO10": 2,
+        "PSO1": 2,
+        "PSO2": 2
+      },
+      "C102.5": {
+        "PO1": 2,
+        "PO2": 3,
+        "PO3": 2,
+        "PO5": 2,
+        "PO9": 1,
+        "PO10": 2,
+        "PO11": 2,
+        "PO12": 1,
+        "PSO1": 1,
+        "PSO2": 3
+      }
+    },
+    "C001": {
+      "C001.1": {
+        "PO1": 3,
+        "PO2": 3,
+        "PO3": 2,
+        "PO4": 2,
+        "PO5": 2,
+        "PO7": 1,
+        "PO8": 2,
+        "PO10": 1,
+        "PSO1": 2,
+        "PSO2": 2
+      },
+      "C001.2": {
+        "PO1": 2,
+        "PO2": 3,
+        "PO3": 2,
+        "PO5": 2,
+        "PO9": 1,
+        "PO10": 2,
+        "PO11": 2,
+        "PO12": 1,
+        "PSO1": 1,
+        "PSO2": 3
+      },
+      "C001.3": {
+        "PO1": 3,
+        "PO2": 2,
+        "PO3": 3,
+        "PO4": 2,
+        "PO5": 2,
+        "PO10": 1,
+        "PSO1": 2,
+        "PSO2": 2
+      },
+      "C001.4": {
+        "PO2": 2,
+        "PO4": 3,
+        "PSO2": 2
+      },
+      "C001.5": {
+        "PO1": 2,
+        "PO2": 3,
+        "PO3": 2,
+        "PO5": 2,
+        "PO9": 1,
+        "PO10": 2,
+        "PO11": 2,
+        "PO12": 1,
+        "PSO1": 1,
+        "PSO2": 3
+      }
+    },
+    "C002": {
+      "C002.1": {
+        "PO1": 3,
+        "PO2": 2,
+        "PO3": 3,
+        "PO4": 2,
+        "PO5": 2,
+        "PO10": 1,
+        "PSO1": 2,
+        "PSO2": 2
+      },
+      "C002.2": {
+        "PO3": 3,
+        "PO4": 2
+      },
+      "C002.3": {
+        "PO1": 2,
+        "PO2": 3,
+        "PO3": 2,
+        "PO5": 2,
+        "PO9": 1,
+        "PO10": 2,
+        "PO11": 2,
+        "PO12": 1,
+        "PSO1": 1,
+        "PSO2": 3
+      },
+      "C002.4": {
+        "PO1": 3,
+        "PO2": 2,
+        "PO3": 3,
+        "PO4": 2,
+        "PO5": 2,
+        "PO10": 1,
+        "PSO1": 2,
+        "PSO2": 2
+      },
+      "C002.5": {
+        "PO1": 2,
+        "PO2": 3,
+        "PO3": 2,
+        "PO5": 2,
+        "PO9": 1,
+        "PO10": 2,
+        "PO11": 2,
+        "PO12": 1,
+        "PSO1": 1,
+        "PSO2": 3
+      }
+    },
+    "C003": {
+      "C003.1": {
+        "PO1": 3,
+        "PO2": 1
+      },
+      "C003.2": {
+        "PO1": 3,
+        "PO2": 2,
+        "PO3": 3,
+        "PO4": 2,
+        "PO5": 2,
+        "PO10": 1,
+        "PSO1": 2,
+        "PSO2": 2
+      },
+      "C003.3": {
+        "PO2": 3,
+        "PO4": 2
+      },
+      "C003.4": {
+        "PO5": 1,
+        "PSO1": 2
+      },
+      "C003.5": {
+        "PO1": 2,
+        "PO12": 2
+      }
+    },
+    "C004": {
+      "C004.1": {
+        "PO1": 3,
+        "PO2": 2
+      },
+      "C004.2": {
+        "PO2": 3,
+        "PO3": 2
+      },
+      "C004.3": {
+        "PO3": 3,
+        "PO4": 3
+      },
+      "C004.4": {
+        "PO5": 2,
+        "PSO1": 3
+      },
+      "C004.5": {
+        "PO1": 2,
+        "PO10": 1
+      }
+    },
+    "C1765016202420": {
+      "C305.1": {
+        "PO1": 3,
+        "PO2": 3
+      },
+      "C305.2": {
+        "PO3": 2,
+        "PO4": 3
+      },
+      "C305.3": {
+        "PO2": 2,
+        "PO5": 3
+      },
+      "C305.4": {
+        "PO5": 3,
+        "PSO1": 3
+      },
+      "C305.5": {
+        "PO1": 2,
+        "PO12": 2
+      }
+    },
+    "C1765028522247": {
+      "C501.1": {
+        "PO1": 2,
+        "PO5": 3,
+        "PSO1": 3
+      },
+      "C501.2": {
+        "PO2": 2,
+        "PO3": 2
+      },
+      "C501.3": {
+        "PO4": 2,
+        "PO12": 1
+      }
+    },
+    "EC201": {
+      "EC201.1": {
+        "PO1": 3,
+        "PO2": 3
+      },
+      "EC201.2": {
+        "PO2": 3,
+        "PO3": 2
+      },
+      "EC201.3": {
+        "PO3": 3,
+        "PO4": 1
+      },
+      "EC201.4": {
+        "PO4": 2,
+        "PO5": 2
+      },
+      "EC201.5": {
+        "PO1": 1,
+        "PO12": 1
+      }
+    },
+    "EC202": {
+      "EC202.1": {
+        "PO1": 3,
+        "PO2": 3
+      },
+      "EC202.2": {
+        "PO2": 3,
+        "PO3": 2
+      },
+      "EC202.3": {
+        "PO3": 3,
+        "PO4": 2,
+        "PO5": 3
+      },
+      "EC202.4": {
+        "PO4": 2,
+        "PO5": 3,
+        "PSO1": 2
+      },
+      "EC202.5": {
+        "PO12": 2
+      }
+    },
+    "EC203": {
+      "EC203.1": {
+        "PO1": 2,
+        "PO5": 3
+      },
+      "EC203.2": {
+        "PO3": 3,
+        "PO4": 2
+      },
+      "EC203.3": {
+        "PO5": 3,
+        "PSO2": 3
+      }
+    },
+    "ME301": {
+      "ME301.1": {
+        "PO1": 3,
+        "PO2": 2
+      },
+      "ME301.2": {
+        "PO1": 3,
+        "PO7": 3
+      },
+      "ME301.3": {
+        "PO2": 2,
+        "PO3": 1
+      },
+      "ME301.4": {
+        "PO6": 2,
+        "PO7": 3
+      },
+      "ME301.5": {
+        "PO1": 2,
+        "PO12": 1
+      }
+    },
+    "ME302": {
+      "ME302.1": {
+        "PO1": 3,
+        "PO2": 3
+      },
+      "ME302.2": {
+        "PO2": 2,
+        "PO4": 2
+      },
+      "ME302.3": {
+        "PO7": 2,
+        "PO12": 1
+      }
+    },
+    "AI401": {
+      "AI401.1": {
+        "PO1": 3,
+        "PO2": 3
+      },
+      "AI401.2": {
+        "PO2": 3,
+        "PO3": 3,
+        "PO5": 2
+      },
+      "AI401.3": {
+        "PO5": 3,
+        "PSO1": 3
+      }
+    },
+    "AI402": {
+      "AI402.1": {
+        "PO1": 3,
+        "PO2": 3,
+        "PO3": 3
+      },
+      "AI402.2": {
+        "PO4": 3,
+        "PO5": 3
+      },
+      "AI402.3": {
+        "PO5": 3,
+        "PSO1": 3,
+        "PSO2": 2
+      }
+    }
+  }
+}
