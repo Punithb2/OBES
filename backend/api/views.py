@@ -35,6 +35,18 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({"error": "Faculty cannot create users"}, status=403)
 
         return super().create(request, *args, **kwargs)
+    
+    def get_queryset(self):
+        queryset = User.objects.all()
+        role = self.request.query_params.get('role')
+        department = self.request.query_params.get('department')
+        
+        if role:
+            queryset = queryset.filter(role=role)
+        if department:
+            queryset = queryset.filter(department=department)
+            
+        return queryset
 
     @action(detail=False, methods=['get'])
     def me(self, request):
@@ -49,6 +61,16 @@ class CourseViewSet(viewsets.ModelViewSet):
 class StudentViewSet(viewsets.ModelViewSet):
     queryset = Student.objects.all()
     serializer_class = StudentSerializer
+
+    def get_queryset(self):
+        queryset = Student.objects.all()
+        department = self.request.query_params.get('department')
+        
+        if department:
+            # Find students enrolled in ANY course belonging to this department
+            queryset = queryset.filter(courses__department=department).distinct()
+            
+        return queryset
 
 class MarkViewSet(viewsets.ModelViewSet):
     queryset = Mark.objects.all()

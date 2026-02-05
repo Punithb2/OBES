@@ -1,36 +1,51 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import api from '../../../services/api';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const ConsolidatedMatrixPage = () => {
+    const { user } = useAuth();
     const [courses, setCourses] = useState([]);
-    const [outcomes, setOutcomes] = useState([]); // Combined POs and PSOs
+    const [outcomes, setOutcomes] = useState([]); 
     const [matrix, setMatrix] = useState({});
     const [selectedSemester, setSelectedSemester] = useState('all');
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchData = async () => {
+            if (!user || !user.department) return;
+
             try {
                 setLoading(true);
+                const deptId = user.department;
+
                 const [coursesRes, posRes, psosRes, matrixRes] = await Promise.all([
-                    api.get('/courses'),
-                    api.get('/pos'),
-                    api.get('/psos'),
-                    api.get('/articulationMatrix')
+                    api.get(`/courses/?departmentId=${deptId}`),
+                    api.get('/pos/'),
+                    api.get('/psos/'),
+                    // If endpoint fails (404), return empty object so page doesn't crash
+                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: {} })) 
                 ]);
 
+                const sortById = (a, b) => {
+                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
+                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    return numA - numB;
+                };
+
                 setCourses(coursesRes.data);
-                setOutcomes([...posRes.data, ...psosRes.data]);
-                setMatrix(matrixRes.data);
+                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
+                setMatrix(matrixRes.data || {});
+
             } catch (error) {
                 console.error("Failed to load matrix data", error);
             } finally {
                 setLoading(false);
             }
         };
+
         fetchData();
-    }, []);
+    }, [user]);
 
     const semesters = [...new Set(courses.map(c => c.semester))].sort((a, b) => a - b);
 
@@ -46,7 +61,7 @@ const ConsolidatedMatrixPage = () => {
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Consolidation of CO-PO & CO-PSO</h1>
                     <p className="text-gray-500 dark:text-gray-400 mt-1">
-                        Review the detailed CO-level articulation for each course in the department.
+                        Review the detailed CO-level articulation for each course in your department.
                     </p>
                 </div>
                 <div className="mt-4 sm:mt-0">
@@ -64,96 +79,104 @@ const ConsolidatedMatrixPage = () => {
                 </div>
             </div>
 
-            {filteredCourses.map(course => {
-                const courseMatrix = matrix[course.id];
-                // Only render if matrix data exists for this course
-                if (!courseMatrix) return null;
+            {filteredCourses.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 border-2 border-dashed rounded-lg">
+                    No courses found for the selected semester.
+                </div>
+            ) : (
+                filteredCourses.map(course => {
+                    // FIX: Default to empty object if no data exists, DO NOT hide the course
+                    const courseMatrix = matrix[course.id] || {}; 
+                    
+                    // Mock COs for display if none exist (usually 5 COs per course)
+                    const coIds = Object.keys(courseMatrix).length > 0 
+                        ? Object.keys(courseMatrix) 
+                        : ['CO1', 'CO2', 'CO3', 'CO4', 'CO5'];
 
-                // Generate dummy COs if not present in course object (since we are using mock IDs)
-                // In a real app, course.cos would come from the DB. 
-                // Here we simulate it based on the matrix keys to ensure the table renders.
-                const coIds = Object.keys(courseMatrix);
-                const displayCos = coIds.map((id, index) => ({
-                    id: id,
-                    description: `Course Outcome ${index + 1}` // Fallback description
-                }));
+                    const displayCos = coIds.map((id, index) => ({
+                        id: id,
+                        description: `Course Outcome ${index + 1}`
+                    }));
 
-                const outcomeAverages = {};
-                outcomes.forEach(outcome => {
-                    let sum = 0;
-                    let count = 0;
-                    displayCos.forEach(co => {
-                        const value = courseMatrix[co.id]?.[outcome.id];
-                        if (value && value > 0) {
-                            sum += value;
-                            count++;
+                    const outcomeAverages = {};
+                    outcomes.forEach(outcome => {
+                        let sum = 0;
+                        let count = 0;
+                        displayCos.forEach(co => {
+                            const value = courseMatrix[co.id]?.[outcome.id];
+                            if (value && value > 0) {
+                                sum += parseFloat(value);
+                                count++;
+                            }
+                        });
+                        if (count > 0) {
+                            outcomeAverages[outcome.id] = sum / count;
                         }
                     });
-                    if (count > 0) {
-                        outcomeAverages[outcome.id] = sum / count;
-                    }
-                });
 
-                return (
-                    <Card key={course.id}>
-                        <CardHeader>
-                            <CardTitle>{course.code} - {course.name}</CardTitle>
-                            <CardDescription>Actual Articulation Matrix (Semester {course.semester})</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="overflow-x-auto border rounded-lg dark:border-gray-700">
-                                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                    <thead className="bg-gray-50 dark:bg-gray-700">
-                                        <tr>
-                                            <th scope="col" className="sticky left-0 bg-gray-50 dark:bg-gray-700 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r dark:border-gray-600">
-                                                COs
-                                            </th>
-                                            {outcomes.map(outcome => (
-                                                <th key={outcome.id} scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                    {outcome.id}
+                    return (
+                        <Card key={course.id}>
+                            <CardHeader>
+                                <CardTitle>{course.code} - {course.name}</CardTitle>
+                                <CardDescription>Articulation Matrix (Semester {course.semester})</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="overflow-x-auto border rounded-lg dark:border-gray-700">
+                                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                        <thead className="bg-gray-50 dark:bg-gray-700">
+                                            <tr>
+                                                <th className="sticky left-0 bg-gray-50 dark:bg-gray-700 px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r dark:border-gray-600 z-10 w-32">
+                                                    COs
                                                 </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                        {displayCos.map(co => (
-                                            <tr key={co.id}>
-                                                <td className="sticky left-0 bg-white dark:bg-gray-800 px-4 py-4 text-sm font-medium text-gray-900 dark:text-white border-r dark:border-gray-600 w-64">
-                                                    <div className="font-bold">{co.id.split('.')[1]}</div>
-                                                    <div className="text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={co.description}>{co.description}</div>
-                                                </td>
                                                 {outcomes.map(outcome => (
-                                                    <td key={outcome.id} className="px-3 py-4 whitespace-nowrap text-center text-sm font-semibold">
-                                                        <span className={courseMatrix[co.id]?.[outcome.id] ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}>
-                                                          {courseMatrix[co.id]?.[outcome.id] || '-'}
-                                                        </span>
-                                                    </td>
+                                                    <th key={outcome.id} className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider min-w-[3rem]">
+                                                        {outcome.id}
+                                                    </th>
                                                 ))}
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                     <tfoot className="border-t-2 border-gray-300 dark:border-gray-600">
-                                        <tr className="bg-red-50 dark:bg-red-900/20">
-                                            <td className="sticky left-0 bg-red-50 dark:bg-red-900/20 px-4 py-4 text-sm font-bold text-gray-900 dark:text-white border-r dark:border-gray-600">
-                                                AVERAGE
-                                            </td>
-                                            {outcomes.map(outcome => {
-                                                const avg = outcomeAverages[outcome.id];
-                                                const displayValue = avg ? (avg % 1 === 0 ? avg.toString() : avg.toFixed(1)) : '-';
-                                                return (
-                                                <td key={`avg-${course.id}-${outcome.id}`} className="px-3 py-4 whitespace-nowrap text-center text-sm font-bold text-gray-800 dark:text-gray-100">
-                                                    {displayValue}
+                                        </thead>
+                                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                            {displayCos.map(co => (
+                                                <tr key={co.id}>
+                                                    <td className="sticky left-0 bg-white dark:bg-gray-800 px-4 py-4 text-sm font-medium text-gray-900 dark:text-white border-r dark:border-gray-600 z-10">
+                                                        <div className="font-bold">{co.id}</div>
+                                                    </td>
+                                                    {outcomes.map(outcome => {
+                                                        const val = courseMatrix[co.id]?.[outcome.id];
+                                                        return (
+                                                            <td key={outcome.id} className="px-3 py-4 whitespace-nowrap text-center text-sm font-semibold">
+                                                                <span className={val ? 'text-gray-800 dark:text-gray-100' : 'text-gray-300 dark:text-gray-600'}>
+                                                                    {val || '-'}
+                                                                </span>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot className="border-t-2 border-gray-300 dark:border-gray-600">
+                                            <tr className="bg-red-50 dark:bg-red-900/20">
+                                                <td className="sticky left-0 bg-red-50 dark:bg-red-900/20 px-4 py-4 text-sm font-bold text-gray-900 dark:text-white border-r dark:border-gray-600 z-10">
+                                                    AVERAGE
                                                 </td>
-                                                );
-                                            })}
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-                        </CardContent>
-                    </Card>
-                );
-            })}
+                                                {outcomes.map(outcome => {
+                                                    const avg = outcomeAverages[outcome.id];
+                                                    const displayValue = avg ? (avg % 1 === 0 ? avg.toString() : avg.toFixed(1)) : '-';
+                                                    return (
+                                                        <td key={`avg-${course.id}-${outcome.id}`} className="px-3 py-4 whitespace-nowrap text-center text-sm font-bold text-gray-800 dark:text-gray-100">
+                                                            {displayValue}
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    );
+                })
+            )}
         </div>
     );
 };

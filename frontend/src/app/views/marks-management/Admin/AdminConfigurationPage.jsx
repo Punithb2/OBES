@@ -7,8 +7,9 @@ const AdminConfigurationPage = () => {
     // --- State Management ---
     const [selectedScheme, setSelectedScheme] = useState('2022 Scheme');
     const [loading, setLoading] = useState(true);
+    const [configId, setConfigId] = useState(null); // To store the actual DB ID (e.g., 1)
     
-    // 1. General Attainment Rules
+    // 1. General Attainment Rules (State matches Frontend logic)
     const [attainmentRules, setAttainmentRules] = useState({
         studentPassThreshold: 50,
         maxAttainmentLevel: 3,
@@ -18,7 +19,11 @@ const AdminConfigurationPage = () => {
     });
 
     // 2. Indirect Assessment Tools
-    const [indirectTools, setIndirectTools] = useState([]);
+    const [indirectTools, setIndirectTools] = useState([
+        { id: 'exit', name: 'Program Exit Survey', weight: 33 },
+        { id: 'employer', name: 'Employer Survey', weight: 33 },
+        { id: 'alumni', name: 'Alumni Survey', weight: 34 }
+    ]);
 
     // 3. Outcomes (Fetched for display)
     const [pos, setPos] = useState([]);
@@ -29,26 +34,42 @@ const AdminConfigurationPage = () => {
         const fetchConfig = async () => {
             try {
                 setLoading(true);
-                // Fetch Global Config
-                // We use 'global' as the ID for the main configuration object
-                const configRes = await api.get('/configurations/global');
-                if (configRes.data) {
-                    setAttainmentRules(configRes.data.attainmentRules);
-                    setIndirectTools(configRes.data.indirectTools);
+                
+                // Fetch Configuration and Outcomes in parallel
+                const [configRes, posRes, psosRes] = await Promise.all([
+                    api.get('/configurations/'), // Fetch list to find the active config
+                    api.get('/pos/'),
+                    api.get('/psos/')
+                ]);
+
+                // Handle Configuration Data
+                if (configRes.data && configRes.data.length > 0) {
+                    // Use the first configuration found
+                    const serverConfig = configRes.data[0];
+                    setConfigId(serverConfig.id);
+                    
+                    // Map Django snake_case fields to React camelCase state
+                    if (serverConfig.attainment_rules) {
+                        setAttainmentRules(serverConfig.attainment_rules);
+                    }
+                    if (serverConfig.indirect_tools) {
+                        setIndirectTools(serverConfig.indirect_tools);
+                    }
                 }
 
-                // Fetch Outcomes for Reference Display
-                const [posRes, psosRes] = await Promise.all([
-                    api.get('/pos'),
-                    api.get('/psos')
-                ]);
-                setPos(posRes.data);
-                setPsos(psosRes.data);
+                // Handle Outcomes
+                // Sort naturally (PO1, PO2...)
+                const sortById = (a, b) => {
+                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
+                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    return numA - numB;
+                };
+
+                setPos(posRes.data.sort(sortById));
+                setPsos(psosRes.data.sort(sortById));
 
             } catch (error) {
                 console.error("Failed to load configuration", error);
-                // If config doesn't exist yet (404), we might want to create it using default state
-                // keeping the default state as fallback
             } finally {
                 setLoading(false);
             }
@@ -91,21 +112,25 @@ const AdminConfigurationPage = () => {
 
     // --- 2. SAVE HANDLER ---
     const handleSave = async () => {
+        // Map React camelCase state to Django snake_case fields
         const payload = {
-            id: "global",
-            attainmentRules,
-            indirectTools
+            attainment_rules: attainmentRules,
+            indirect_tools: indirectTools
         };
 
         try {
-            // We use PUT to completely replace the config at 'configurations/global'
-            // If it doesn't exist, this might fail depending on json-server version, 
-            // but since we seeded db.json, it should update.
-            await api.put('/configurations/global', payload);
+            if (configId) {
+                // UPDATE existing config (PATCH)
+                await api.patch(`/configurations/${configId}/`, payload);
+            } else {
+                // CREATE new config (POST)
+                const res = await api.post('/configurations/', payload);
+                setConfigId(res.data.id);
+            }
             alert(`Configuration saved successfully.`);
         } catch (error) {
             console.error("Failed to save configuration", error);
-            alert("Failed to save configuration.");
+            alert("Failed to save configuration. Please try again.");
         }
     };
 
@@ -127,7 +152,6 @@ const AdminConfigurationPage = () => {
                         className="block w-48 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-gray-900 font-medium dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     >
                         <option>2022 Scheme</option>
-                        {/* Add more schemes if your backend supports multiple config IDs */}
                     </select>
                     <button 
                         onClick={handleSave}
@@ -174,7 +198,7 @@ const AdminConfigurationPage = () => {
                     </CardHeader>
                     <CardContent className="space-y-3">
                         {['level3', 'level2', 'level1'].map((level, idx) => (
-                            <div key={level} className="flex items-center justify-between border-b border-gray-100 last:border-0 pb-2 last:pb-0">
+                            <div key={level} className="flex items-center justify-between border-b border-gray-100 last:border-0 pb-2 last:pb-0 dark:border-gray-700">
                                 <span className="text-sm font-bold text-gray-800 dark:text-gray-200">
                                     Level {3 - idx}
                                 </span>
@@ -209,7 +233,7 @@ const AdminConfigurationPage = () => {
                                 type="range" min="0" max="100" 
                                 value={attainmentRules.directSplit.cie} 
                                 onChange={(e) => handleCieWeightChange(parseInt(e.target.value))}
-                                className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-primary-600"
+                                className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-primary-600 dark:bg-gray-600"
                             />
                         </div>
                         <div>
@@ -221,7 +245,7 @@ const AdminConfigurationPage = () => {
                                 type="range" min="0" max="100" 
                                 value={attainmentRules.directSplit.see} 
                                 disabled
-                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-not-allowed"
+                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-not-allowed dark:bg-gray-700"
                             />
                         </div>
                     </CardContent>
@@ -243,7 +267,7 @@ const AdminConfigurationPage = () => {
                                 type="range" min="0" max="100" 
                                 value={attainmentRules.finalWeightage.direct} 
                                 onChange={(e) => handleDirectWeightChange(parseInt(e.target.value))}
-                                className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-primary-600"
+                                className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-primary-600 dark:bg-gray-600"
                             />
                         </div>
                         <div>
@@ -255,7 +279,7 @@ const AdminConfigurationPage = () => {
                                 type="range" min="0" max="100" 
                                 value={attainmentRules.finalWeightage.indirect} 
                                 disabled
-                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-not-allowed"
+                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-not-allowed dark:bg-gray-700"
                             />
                         </div>
                     </CardContent>
@@ -266,39 +290,41 @@ const AdminConfigurationPage = () => {
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mt-8">Indirect Assessment Tools</h2>
             <Card>
                 <CardContent className="p-0">
-                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                        <thead className="bg-gray-100 dark:bg-gray-800">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Tool Name</th>
-                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Weightage (%)</th>
-                                <th className="px-6 py-3 text-right text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                            {indirectTools.map((tool) => (
-                                <tr key={tool.id}>
-                                    <td className="px-6 py-4">
-                                        <input 
-                                            value={tool.name}
-                                            onChange={(e) => handleToolChange(tool.id, 'name', e.target.value)}
-                                            className="border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-primary-500 text-sm font-bold text-gray-900 dark:text-white w-full dark:bg-gray-700 dark:border-gray-600"
-                                        />
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <input 
-                                            type="number"
-                                            value={tool.weight}
-                                            onChange={(e) => handleToolChange(tool.id, 'weight', e.target.value)}
-                                            className="w-24 rounded border-gray-300 text-sm py-1 font-bold text-gray-900 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-center"
-                                        />
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Fixed</span>
-                                    </td>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead className="bg-gray-100 dark:bg-gray-800">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Tool Name</th>
+                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Weightage (%)</th>
+                                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Action</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                {indirectTools.map((tool) => (
+                                    <tr key={tool.id}>
+                                        <td className="px-6 py-4">
+                                            <input 
+                                                value={tool.name}
+                                                onChange={(e) => handleToolChange(tool.id, 'name', e.target.value)}
+                                                className="border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-primary-500 text-sm font-bold text-gray-900 dark:text-white w-full dark:bg-gray-700 dark:border-gray-600"
+                                            />
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <input 
+                                                type="number"
+                                                value={tool.weight}
+                                                onChange={(e) => handleToolChange(tool.id, 'weight', e.target.value)}
+                                                className="w-24 rounded border-gray-300 text-sm py-1 font-bold text-gray-900 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-center"
+                                            />
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Fixed</span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </CardContent>
             </Card>
 
@@ -309,7 +335,6 @@ const AdminConfigurationPage = () => {
                     <CardHeader>
                         <div className="flex justify-between items-center">
                             <CardTitle>Program Outcomes (POs)</CardTitle>
-                            {/* Link to editing page if needed */}
                             <a href="/admin/outcomes" className="text-xs text-primary-600 hover:underline dark:text-primary-400">Manage</a>
                         </div>
                     </CardHeader>

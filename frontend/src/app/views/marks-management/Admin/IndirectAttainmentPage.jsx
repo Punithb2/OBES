@@ -18,7 +18,7 @@ const SurveyCard = ({ title, description, outcomes, ratings, onRatingChange }) =
                             <tr>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase w-24">Outcome</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Description</th>
-                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase w-40">Rating (1-3)</th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase w-40">Rating (0-3)</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -35,7 +35,7 @@ const SurveyCard = ({ title, description, outcomes, ratings, onRatingChange }) =
                                             value={ratings?.[outcome.id] ?? ''}
                                             onChange={(e) => onRatingChange(outcome.id, e.target.value)}
                                             className="w-24 h-10 text-center border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-primary-500 focus:border-primary-500 transition-colors"
-                                            aria-label={`Rating for ${outcome.id}`}
+                                            placeholder="-"
                                         />
                                     </td>
                                 </tr>
@@ -51,8 +51,11 @@ const SurveyCard = ({ title, description, outcomes, ratings, onRatingChange }) =
 const IndirectAttainmentPage = () => {
     const { user } = useAuth();
     const [loading, setLoading] = useState(true);
-    const [outcomes, setOutcomes] = useState([]); // Combined POs and PSOs
+    const [outcomes, setOutcomes] = useState([]); 
     
+    // Store the ID of the survey record if it exists (for updates)
+    const [surveyId, setSurveyId] = useState(null);
+
     // State to store ratings
     const [surveyRatings, setSurveyRatings] = useState({
         exitSurvey: {},
@@ -63,24 +66,40 @@ const IndirectAttainmentPage = () => {
     // 1. Fetch Data
     useEffect(() => {
         const fetchData = async () => {
-            if (!user?.departmentId) return;
+            if (!user || !user.department) return;
 
             try {
                 setLoading(true);
+                const deptId = user.department;
+
                 // Fetch Outcomes
                 const [posRes, psosRes] = await Promise.all([
-                    api.get('/pos'),
-                    api.get('/psos')
+                    api.get('/pos/'),
+                    api.get('/psos/')
                 ]);
-                setOutcomes([...posRes.data, ...psosRes.data]);
+                
+                // Sort naturally
+                const sortById = (a, b) => {
+                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
+                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    return numA - numB;
+                };
+                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
 
-                // Fetch Existing Survey Data for this Department
-                try {
-                    const surveyRes = await api.get(`/surveys/${user.departmentId}`);
-                    setSurveyRatings(surveyRes.data);
-                } catch (err) {
-                    // If 404 (not found), we'll create it on save. 
-                    // State remains default empty objects.
+                // Fetch Existing Survey Data
+                // Filter by department to find the specific record
+                const surveyRes = await api.get(`/surveys/?department=${deptId}`);
+                
+                if (surveyRes.data && surveyRes.data.length > 0) {
+                    // Data exists: Load it
+                    const existingData = surveyRes.data[0];
+                    setSurveyId(existingData.id); // Save ID for PUT/PATCH later
+                    setSurveyRatings({
+                        exitSurvey: existingData.exitSurvey || {},
+                        employerSurvey: existingData.employerSurvey || {},
+                        alumniSurvey: existingData.alumniSurvey || {}
+                    });
+                } else {
                     console.log("No existing survey data found, starting fresh.");
                 }
 
@@ -110,25 +129,29 @@ const IndirectAttainmentPage = () => {
 
     // 3. Save Changes
     const handleSaveChanges = async () => {
-        if (!user?.departmentId) return;
+        if (!user || !user.department) return;
 
         const payload = {
-            id: user.departmentId,
-            ...surveyRatings
+            department: user.department,
+            exitSurvey: surveyRatings.exitSurvey,
+            employerSurvey: surveyRatings.employerSurvey,
+            alumniSurvey: surveyRatings.alumniSurvey
         };
 
         try {
-            // Try to update first
-            try {
-                await api.put(`/surveys/${user.departmentId}`, payload);
-            } catch (err) {
-                // If update fails (e.g. 404), create new
-                await api.post('/surveys', payload);
+            if (surveyId) {
+                // UPDATE existing record (PATCH)
+                await api.patch(`/surveys/${surveyId}/`, payload);
+            } else {
+                // CREATE new record (POST)
+                const res = await api.post('/surveys/', payload);
+                // Capture the new ID immediately so next save is an update
+                setSurveyId(res.data.id); 
             }
             alert('Survey ratings saved successfully!');
         } catch (error) {
             console.error("Failed to save surveys", error);
-            alert('Error saving data.');
+            alert('Error saving data. Please check your network connection.');
         }
     };
 
@@ -171,7 +194,7 @@ const IndirectAttainmentPage = () => {
 
             <SurveyCard
                 title="Alumni Survey"
-                description="Feedback from alumni on how well the program prepared them for their careers, collected a few years after graduation."
+                description="Feedback from alumni on how well the program prepared them for their careers."
                 outcomes={outcomes}
                 ratings={surveyRatings.alumniSurvey}
                 onRatingChange={(outcomeId, value) => handleRatingChange('alumniSurvey', outcomeId, value)}

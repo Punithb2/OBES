@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { Icons } from '../shared/icons';
-import ConfirmationModal from '../shared/ConfirmationModal';
+import ConfirmationModal from '../shared/ConfirmationModal'; // Fix Import if needed
 import api from '../../../services/api';
 
 const OutcomesManagement = () => {
@@ -15,12 +15,19 @@ const OutcomesManagement = () => {
         try {
             setLoading(true);
             const [posRes, psosRes] = await Promise.all([
-                api.get('/pos'),
-                api.get('/psos')
+                api.get('/pos/'),  // Added trailing slash
+                api.get('/psos/')  // Added trailing slash
             ]);
-            // Optional: Sort by ID if needed (e.g., PO1, PO2...)
-            setPos(posRes.data);
-            setPsos(psosRes.data);
+            
+            // Sort by ID naturally (PO1, PO2, PO10...)
+            const sortById = (a, b) => {
+                const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
+                const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                return numA - numB;
+            };
+
+            setPos(posRes.data.sort(sortById));
+            setPsos(psosRes.data.sort(sortById));
         } catch (error) {
             console.error("Failed to load outcomes", error);
         } finally {
@@ -35,14 +42,12 @@ const OutcomesManagement = () => {
     // 2. Add Handlers (Auto-Generate ID)
     const handleAddPo = async () => {
         try {
-            // Logic to find next ID: PO + (current length + 1)
-            // You could also parse the highest number from existing IDs for robustness
             const nextNum = pos.length + 1;
             const newPo = { 
                 id: `PO${nextNum}`, 
                 description: 'New Program Outcome' 
             };
-            await api.post('/pos', newPo);
+            await api.post('/pos/', newPo); // Added trailing slash
             fetchData();
         } catch (error) {
             console.error("Failed to add PO", error);
@@ -56,7 +61,7 @@ const OutcomesManagement = () => {
                 id: `PSO${nextNum}`, 
                 description: 'New Program Specific Outcome' 
             };
-            await api.post('/psos', newPso);
+            await api.post('/psos/', newPso); // Added trailing slash
             fetchData();
         } catch (error) {
             console.error("Failed to add PSO", error);
@@ -64,8 +69,6 @@ const OutcomesManagement = () => {
     };
 
     // 3. Edit Handlers (Inline Edit with Auto-Save on Blur)
-    
-    // Updates local state immediately for smooth typing
     const handleDescriptionChange = (id, newDescription, type) => {
         if (type === 'po') {
             setPos(prev => prev.map(item => item.id === id ? { ...item, description: newDescription } : item));
@@ -74,14 +77,13 @@ const OutcomesManagement = () => {
         }
     };
 
-    // Sends update to server when user clicks away
     const handleDescriptionBlur = async (id, newDescription, type) => {
         try {
             const endpoint = type === 'po' ? '/pos' : '/psos';
-            await api.patch(`${endpoint}/${id}`, { description: newDescription });
+            // Added trailing slash
+            await api.patch(`${endpoint}/${id}/`, { description: newDescription });
         } catch (error) {
             console.error(`Failed to update ${type.toUpperCase()}`, error);
-            // Optional: You could add a toast notification for error here
         }
     };
 
@@ -96,23 +98,27 @@ const OutcomesManagement = () => {
 
         try {
             const endpoint = type === 'po' ? '/pos' : '/psos';
-            await api.delete(`${endpoint}/${outcomeId}`);
+            // Added trailing slash
+            await api.delete(`${endpoint}/${outcomeId}/`);
+            
             fetchData();
             setDeleteConfirmation({ isOpen: false, outcomeId: null, type: null });
         } catch (error) {
             console.error("Failed to delete outcome", error);
-            alert("Failed to delete outcome. It might be in use.");
+            alert("Failed to delete outcome. It might be linked to existing data.");
         }
     };
 
     return (
         <div className="p-6 space-y-6">
+            {/* Confirmation Modal */}
             {deleteConfirmation.isOpen && (
                 <ConfirmationModal 
+                    isOpen={deleteConfirmation.isOpen} // Ensure your modal accepts 'isOpen'
                     onConfirm={confirmDelete}
                     onCancel={() => setDeleteConfirmation({ isOpen: false, outcomeId: null, type: null })}
                     title={`Delete ${deleteConfirmation.type === 'po' ? 'Program Outcome' : 'PSO'}`}
-                    message="Are you sure you want to delete this outcome? This action cannot be undone."
+                    message="Are you sure you want to delete this outcome? This cannot be undone."
                 />
             )}
             
@@ -126,9 +132,9 @@ const OutcomesManagement = () => {
                         </div>
                         <button 
                             onClick={handleAddPo}
-                            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
+                            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium transition-colors"
                         >
-                           <Icons.PlusCircle className="h-4 w-4" /> Add PO
+                            <Icons.PlusCircle className="h-4 w-4" /> Add PO
                         </button>
                     </div>
                 </CardHeader>
@@ -162,7 +168,7 @@ const OutcomesManagement = () => {
                                                     onClick={() => requestDeleteOutcome(po.id, 'po')} 
                                                     className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
                                                 >
-                                                    <Icons.Trash2 className="h-4 w-4" />
+                                                    <Icons.Trash className="h-4 w-4" />
                                                 </button>
                                             </td>
                                         </tr>
@@ -178,12 +184,14 @@ const OutcomesManagement = () => {
             <Card>
                 <CardHeader>
                     <div className="flex justify-between items-center">
-                        <CardTitle>Manage Program Specific Outcomes (PSOs)</CardTitle>
+                        <div>
+                            <CardTitle>Manage Program Specific Outcomes (PSOs)</CardTitle>
+                        </div>
                         <button 
                             onClick={handleAddPso}
-                            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
+                            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium transition-colors"
                         >
-                           <Icons.PlusCircle className="h-4 w-4" /> Add PSO
+                            <Icons.PlusCircle className="h-4 w-4" /> Add PSO
                         </button>
                     </div>
                 </CardHeader>
@@ -217,7 +225,7 @@ const OutcomesManagement = () => {
                                                     onClick={() => requestDeleteOutcome(pso.id, 'pso')} 
                                                     className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
                                                 >
-                                                    <Icons.Trash2 className="h-4 w-4" />
+                                                    <Icons.Trash className="h-4 w-4" />
                                                 </button>
                                             </td>
                                         </tr>

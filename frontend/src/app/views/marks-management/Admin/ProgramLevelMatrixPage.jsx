@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '../shared/Card';
 import api from '../../../services/api';
+// FIX: Import useAuth
+import { useAuth } from '../../../contexts/AuthContext';
 
 const ProgramLevelMatrixPage = () => {
+    const { user } = useAuth(); // Get current user
     const [courses, setCourses] = useState([]);
     const [outcomes, setOutcomes] = useState([]);
     const [matrix, setMatrix] = useState({});
@@ -11,31 +14,49 @@ const ProgramLevelMatrixPage = () => {
 
     useEffect(() => {
         const fetchData = async () => {
+            if (!user || !user.department) return;
+
             try {
                 setLoading(true);
+                const deptId = user.department;
+
                 const [coursesRes, posRes, psosRes, matrixRes] = await Promise.all([
-                    api.get('/courses'),
-                    api.get('/pos'),
-                    api.get('/psos'),
-                    api.get('/articulationMatrix')
+                    // 1. Fetch Courses for Dept
+                    api.get(`/courses/?departmentId=${deptId}`),
+                    // 2. Fetch POs
+                    api.get('/pos/'),
+                    // 3. Fetch PSOs
+                    api.get('/psos/'),
+                    // 4. Fetch Matrix (Handle 404 if empty)
+                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: {} }))
                 ]);
+
+                // Sort Outcomes naturally
+                const sortById = (a, b) => {
+                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
+                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    return numA - numB;
+                };
+
                 setCourses(coursesRes.data);
-                setOutcomes([...posRes.data, ...psosRes.data]);
-                setMatrix(matrixRes.data);
+                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
+                setMatrix(matrixRes.data || {});
+
             } catch (error) {
                 console.error("Failed to load data", error);
             } finally {
                 setLoading(false);
             }
         };
+
         fetchData();
-    }, []);
+    }, [user]);
 
     // Group courses by semester
     const coursesBySemester = useMemo(() => {
         return courses.reduce((acc, course) => {
-            // Only include courses that have matrix data
-            if (!matrix[course.id]) return acc; 
+            // FIX: Removed the check "if (!matrix[course.id]) return acc;" 
+            // We want to show the course row even if data is missing (it will show empty/dashes)
             
             const semester = course.semester;
             if (!acc[semester]) {
@@ -60,7 +81,7 @@ const ProgramLevelMatrixPage = () => {
 
     const calculateAverages = (course) => {
         const courseMatrix = matrix[course.id];
-        if (!courseMatrix) return {};
+        if (!courseMatrix) return {}; // Return empty if no data
 
         const averages = {};
         outcomes.forEach(outcome => {
@@ -70,7 +91,7 @@ const ProgramLevelMatrixPage = () => {
             Object.values(courseMatrix).forEach(coMap => {
                 const value = coMap[outcome.id];
                 if (value && value > 0) {
-                    sum += value;
+                    sum += parseFloat(value);
                     count++;
                 }
             });
@@ -84,7 +105,7 @@ const ProgramLevelMatrixPage = () => {
     if (loading) return <div className="p-12 text-center text-gray-500">Loading report...</div>;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Program Level CO-PO & PSO Matrix</h1>
@@ -119,11 +140,11 @@ const ProgramLevelMatrixPage = () => {
                                         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                             <thead className="bg-gray-50 dark:bg-gray-700/50">
                                                 <tr>
-                                                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                        Mapping of CO_PO & PSO Matrix
+                                                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider min-w-[150px]">
+                                                        Course Code
                                                     </th>
                                                     {outcomes.map(outcome => (
-                                                        <th key={outcome.id} scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                                        <th key={outcome.id} scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider min-w-[3rem]">
                                                             {outcome.id}
                                                         </th>
                                                     ))}
@@ -133,16 +154,17 @@ const ProgramLevelMatrixPage = () => {
                                                 {semesterCourses.map(course => {
                                                     const averages = calculateAverages(course);
                                                     return (
-                                                        <tr key={course.id}>
+                                                        <tr key={course.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                                             <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-white">
                                                                 {course.code}
                                                             </td>
                                                             {outcomes.map(outcome => {
                                                                 const avg = averages[outcome.id];
-                                                                const displayValue = avg ? avg.toFixed(2) : '-';
+                                                                // If avg exists, format it. Else show '-'
+                                                                const displayValue = avg ? (avg % 1 === 0 ? avg.toString() : avg.toFixed(2)) : '-';
                                                                 return (
                                                                     <td key={`${course.id}-${outcome.id}`} className="px-3 py-4 whitespace-nowrap text-center text-sm">
-                                                                        <span className={avg ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}>
+                                                                        <span className={avg ? 'text-gray-800 dark:text-gray-100 font-medium' : 'text-gray-300 dark:text-gray-600'}>
                                                                             {displayValue}
                                                                         </span>
                                                                     </td>
@@ -157,8 +179,8 @@ const ProgramLevelMatrixPage = () => {
                                 </div>
                             ))
                         ) : (
-                            <div className="text-center py-10 text-gray-500 dark:text-gray-400">
-                                No courses with articulation data found.
+                            <div className="text-center py-10 text-gray-500 dark:text-gray-400 border-2 border-dashed rounded-lg">
+                                No courses found for the selected semester.
                             </div>
                         )}
                     </div>

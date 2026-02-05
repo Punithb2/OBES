@@ -4,7 +4,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
 import { Icons } from '../shared/icons';
 
-// Mock suggestions database
+// Mock suggestions database (In a real app, this could be an API endpoint)
 const SUGGESTIONS_DB = {
     'PO1': ['Conduct remedial classes on fundamental engineering concepts.', 'Introduce technical quizzes to reinforce basic knowledge.'],
     'PO2': ['Increase problem-solving sessions during tutorials.', 'Assign complex case studies requiring analytical thinking.'],
@@ -31,30 +31,51 @@ const ImprovementActionsPage = () => {
     const [surveyData, setSurveyData] = useState({ exitSurvey: {}, employerSurvey: {}, alumniSurvey: {} });
     const [config, setConfig] = useState(null);
 
-    const THRESHOLD = 1.9;
+    // Target Threshold (Outcomes below this value will be flagged)
+    // You can also fetch this from config if you want it dynamic
+    const THRESHOLD = 2.0; 
 
     // 1. Fetch Data
     useEffect(() => {
         const fetchData = async () => {
+            if (!user || !user.department) return;
+
             try {
                 setLoading(true);
+                const deptId = user.department;
+
                 const [coursesRes, posRes, psosRes, matrixRes, configRes, surveyRes] = await Promise.all([
-                    api.get('/courses'),
-                    api.get('/pos'),
-                    api.get('/psos'),
-                    api.get('/articulationMatrix'),
-                    api.get('/configurations/global'),
-                    api.get(`/surveys/${user?.departmentId}`).catch(() => ({ data: {} }))
+                    api.get(`/courses/?departmentId=${deptId}`),
+                    api.get('/pos/'),
+                    api.get('/psos/'),
+                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: {} })),
+                    api.get('/configurations/global/').catch(() => ({ data: null })),
+                    api.get(`/surveys/?department=${deptId}`).catch(() => ({ data: {} }))
                 ]);
 
+                // Sort outcomes naturally
+                const sortById = (a, b) => {
+                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
+                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    return numA - numB;
+                };
+
                 setCourses(coursesRes.data);
-                setOutcomes([...posRes.data, ...psosRes.data]);
-                setMatrix(matrixRes.data);
+                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
+                setMatrix(matrixRes.data || {});
                 setConfig(configRes.data);
-                if (surveyRes.data) setSurveyData(surveyRes.data);
+                
+                // Handle Survey Data (array vs object check)
+                if (surveyRes.data) {
+                    if (Array.isArray(surveyRes.data) && surveyRes.data.length > 0) {
+                        setSurveyData(surveyRes.data[0]);
+                    } else if (!Array.isArray(surveyRes.data)) {
+                        setSurveyData(surveyRes.data); // Fallback if API returns object
+                    }
+                }
 
             } catch (error) {
-                console.error("Failed to load evaluation data", error);
+                console.error("Failed to load data", error);
             } finally {
                 setLoading(false);
             }
@@ -66,18 +87,16 @@ const ImprovementActionsPage = () => {
     const lowAttainmentData = useMemo(() => {
         if (!outcomes.length) return [];
 
-        // Filter valid courses
-        const validCourses = courses.filter(c => matrix[c.id]);
-
-        // Calculate Course Averages
-        const courseAverages = validCourses.map(course => {
-            const courseMatrix = matrix[course.id];
+        // Filter valid courses (those that have matrix data)
+        const validCourses = courses.map(course => {
+            const courseMatrix = matrix[course.id] || {}; // Handle missing matrix
             const avgs = {};
+            
             outcomes.forEach(outcome => {
                 let sum = 0, count = 0;
                 Object.values(courseMatrix).forEach(coMap => {
                     const val = coMap[outcome.id];
-                    if (val) { sum += val; count++; }
+                    if (val) { sum += parseFloat(val); count++; }
                 });
                 if (count > 0) avgs[outcome.id] = sum / count;
             });
@@ -88,7 +107,7 @@ const ImprovementActionsPage = () => {
         const directAttainment = {};
         outcomes.forEach(outcome => {
             let sum = 0, count = 0;
-            courseAverages.forEach(c => {
+            validCourses.forEach(c => {
                 if (c.avgs[outcome.id]) { sum += c.avgs[outcome.id]; count++; }
             });
             directAttainment[outcome.id] = count > 0 ? sum / count : 0;
@@ -97,10 +116,13 @@ const ImprovementActionsPage = () => {
         // Calculate Indirect Attainment (Surveys)
         const { exitSurvey = {}, employerSurvey = {}, alumniSurvey = {} } = surveyData;
         const indirectAttainment = {};
+        
         outcomes.forEach(outcome => {
             const v1 = parseFloat(exitSurvey[outcome.id]) || 0;
             const v2 = parseFloat(employerSurvey[outcome.id]) || 0;
             const v3 = parseFloat(alumniSurvey[outcome.id]) || 0;
+            
+            // Calculate indirect only if we have data points
             let total = v1 + v2 + v3;
             let divisor = (v1 ? 1 : 0) + (v2 ? 1 : 0) + (v3 ? 1 : 0);
             indirectAttainment[outcome.id] = divisor > 0 ? total / divisor : 0;
@@ -117,11 +139,13 @@ const ImprovementActionsPage = () => {
             const ia = indirectAttainment[outcome.id] || 0;
             const total = (da * directWeight) + (ia * indirectWeight);
 
-            if (total < THRESHOLD) {
+            // Only flag if attainment is non-zero AND below threshold
+            // (Ignoring 0 allows avoiding flagging outcomes that simply have no data yet)
+            if (total > 0 && total < THRESHOLD) {
                 lowPerformers.push({
                     ...outcome,
                     attained: total.toFixed(2),
-                    suggestions: SUGGESTIONS_DB[outcome.id] || ['Review curriculum gaps for this outcome.', 'Consult senior faculty for pedagogical improvements.']
+                    suggestions: SUGGESTIONS_DB[outcome.id] || ['Review curriculum gaps.', 'Consult academic experts.']
                 });
             }
         });
@@ -147,8 +171,11 @@ const ImprovementActionsPage = () => {
                         <div className="rounded-full bg-green-100 p-3 mb-4 dark:bg-green-800">
                             <Icons.ShieldCheck className="h-8 w-8 text-green-600 dark:text-green-200" />
                         </div>
-                        <h3 className="text-xl font-bold text-green-800 dark:text-green-100">Excellent!</h3>
-                        <p className="text-green-700 dark:text-green-300 mt-2">All Program Outcomes have reached the target attainment level of {THRESHOLD}.</p>
+                        <h3 className="text-xl font-bold text-green-800 dark:text-green-100">Excellent Performance!</h3>
+                        <p className="text-green-700 dark:text-green-300 mt-2 text-center">
+                            All measured Program Outcomes have reached or exceeded the target attainment level of {THRESHOLD}.<br/>
+                            (Or insufficient data is available to calculate attainment).
+                        </p>
                     </CardContent>
                 </Card>
             ) : (
