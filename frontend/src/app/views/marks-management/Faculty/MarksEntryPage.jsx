@@ -1,17 +1,15 @@
-// src/app/views/marks-management/Faculty/MarksEntryPage.jsx
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
 import { Save, Pencil, Unlock, Check, Download, FileSpreadsheet, TrendingUp } from 'lucide-react';
 
-// --- COMPARISON MODAL (Read Only - Override Removed) ---
+// --- COMPARISON MODAL ---
 const ComparisonModal = ({ isOpen, onClose, data }) => {
     if (!isOpen || !data) return null;
 
     const { student, originalMarks, improvementMarks, targetAssessmentName, config } = data;
 
-    // Helper to sum scores based on config structure
     const calcTotal = (scores) => {
         return config.questions.reduce((acc, q) => acc + (parseInt(scores?.[q.q] || 0) || 0), 0);
     };
@@ -89,8 +87,8 @@ const MarksEntryPage = () => {
   const [isTableVisible, setIsTableVisible] = useState(false);
   const [currentStudents, setCurrentStudents] = useState([]); 
   const [marks, setMarks] = useState({}); 
-  const [improvementMap, setImprovementMap] = useState({}); // { studentId: "Internal Assessment 1" }
-  const [improvementMarksList, setImprovementMarksList] = useState([]); // Cache for all improvement marks
+  const [improvementMap, setImprovementMap] = useState({});
+  const [improvementMarksList, setImprovementMarksList] = useState([]);
   const [marksMeta, setMarksMeta] = useState({});
   const [editableRows, setEditableRows] = useState({}); 
   const [showSuccess, setShowSuccess] = useState(false);
@@ -106,10 +104,14 @@ const MarksEntryPage = () => {
     const fetchCourses = async () => {
         if (!user) return;
         try {
-            const res = await api.get(`/courses?assignedFacultyId=${user.id}`);
-            setCourses(res.data);
-            if (res.data.length > 0) {
-                setSelectedCourseId(res.data[0].id);
+            // FIX: Ensure we use the correct query param if backend supports filtering
+            const res = await api.get(`/courses/`);
+            // Client-side filter to be safe
+            const myCourses = res.data.filter(c => String(c.assigned_faculty) === String(user.id));
+            setCourses(myCourses);
+            
+            if (myCourses.length > 0) {
+                setSelectedCourseId(myCourses[0].id);
             }
         } catch (error) {
             console.error("Failed to load courses", error);
@@ -122,8 +124,9 @@ const MarksEntryPage = () => {
     courses.find(c => c.id === selectedCourseId), 
   [courses, selectedCourseId]);
 
+  // FIX: Use 'assessment_tools' (snake_case) from Django
   const assessmentOptions = useMemo(() => {
-      return selectedCourse?.assessmentTools || [];
+      return selectedCourse?.assessment_tools || [];
   }, [selectedCourse]);
 
   // Options for the dropdown inside the Improvement Test table
@@ -168,12 +171,10 @@ const MarksEntryPage = () => {
               max: parseInt(marks) || 0
           }));
       }
-      // Note: If isImprovement is true, questions are generated dynamically per row
 
       return config;
   }, [assessmentOptions, selectedAssessmentName]);
 
-  // Helper to get config for a specific internal assessment (used in Improvement table)
   const getInternalConfig = (assessmentName) => {
       const tool = assessmentOptions.find(t => t.name === assessmentName);
       if (!tool) return { questions: [], total: 0 };
@@ -202,20 +203,21 @@ const MarksEntryPage = () => {
     if (!selectedCourseId || !selectedAssessmentName || !currentToolConfig) return;
     setLoading(true);
     try {
-        const studentsRes = await api.get(`/students?courseId=${selectedCourseId}`);
-        const students = studentsRes.data;
+        const studentsRes = await api.get(`/students/`);
+        const allStudents = studentsRes.data;
+        // FIX: Add safety check '?.includes'
+        const students = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
         setCurrentStudents(students);
 
-        const marksRes = await api.get(`/marks?courseId=${selectedCourseId}&assessment=${selectedAssessmentName}`);
-        const existingMarks = marksRes.data;
+        const marksRes = await api.get(`/marks/`);
+        const allMarks = marksRes.data;
+        const existingMarks = allMarks.filter(m => m.course === selectedCourseId && m.assessment_name === selectedAssessmentName);
 
-        // --- NEW: If this is a STANDARD test, check if any IMPROVEMENT test exists for this course ---
         if (!currentToolConfig.isImprovement) {
             const improvementTool = assessmentOptions.find(t => t.type === 'Improvement Test');
             if (improvementTool) {
-                // Fetch ALL marks for the improvement test to check later if a student took it for THIS assessment
-                const impMarksRes = await api.get(`/marks?courseId=${selectedCourseId}&assessment=${improvementTool.name}`);
-                setImprovementMarksList(impMarksRes.data);
+                const impMarks = allMarks.filter(m => m.course === selectedCourseId && m.assessment_name === improvementTool.name);
+                setImprovementMarksList(impMarks);
             } else {
                 setImprovementMarksList([]);
             }
@@ -227,14 +229,14 @@ const MarksEntryPage = () => {
         const initialEditable = {};
 
         existingMarks.forEach(record => {
-            initialMarks[record.studentId] = record.scores || {};
-            initialMeta[record.studentId] = record;
-            if (record.improvementTarget) {
-                initialMap[record.studentId] = record.improvementTarget;
+            initialMarks[record.student] = record.scores || {};
+            initialMeta[record.student] = record;
+            
+            if (record.scores && record.scores._improvementTarget) {
+                initialMap[record.student] = record.scores._improvementTarget;
             }
         });
 
-        // Initialize empty rows logic
         students.forEach(student => {
              if (!initialMarks[student.id]) {
                  initialMarks[student.id] = {};
@@ -257,23 +259,21 @@ const MarksEntryPage = () => {
   };
 
   // --- Handlers ---
-  
   const handleImprovementTargetChange = (studentId, targetName) => {
       setImprovementMap(prev => ({ ...prev, [studentId]: targetName }));
-      // Clear existing marks for this student if target changes or is set to empty
       setMarks(prev => {
           const newMarks = { ...prev };
-          delete newMarks[studentId]; // Reset marks
+          newMarks[studentId] = {}; 
           return newMarks;
       });
   };
 
   const openComparisonModal = (student) => {
-      // Find the specific improvement record for this student AND this target assessment
-      const impRecord = improvementMarksList.find(r => 
-          r.studentId === student.id && 
-          r.improvementTarget === selectedAssessmentName
-      );
+      const impRecord = improvementMarksList.find(r => {
+          return r.student === student.id && 
+                 r.scores && 
+                 r.scores._improvementTarget === selectedAssessmentName;
+      });
 
       if (impRecord) {
            setComparisonData({
@@ -292,7 +292,7 @@ const MarksEntryPage = () => {
     const max = config.questions.find(q => q.q === questionIdentifier)?.max || config.total;
     
     if (value === '') {
-        delete newMarks[studentId][questionIdentifier];
+        if (newMarks[studentId]) delete newMarks[studentId][questionIdentifier];
     } else {
         let numValue = parseInt(value, 10);
         if (!isNaN(numValue)) {
@@ -311,7 +311,9 @@ const MarksEntryPage = () => {
       const config = dynamicConfig || currentToolConfig;
       if (config?.questions) {
           config.questions.forEach(q => {
-              total += Number(studentMarks[q.q]) || 0;
+              if (!q.q.startsWith('_')) {
+                  total += Number(studentMarks[q.q]) || 0;
+              }
           });
       }
       return total;
@@ -325,42 +327,48 @@ const MarksEntryPage = () => {
     setLoading(true);
     try {
         const promises = currentStudents.map(async (student) => {
-            const scores = marks[student.id];
+            let scores = { ...marks[student.id] };
             
-            // IMPROVEMENT LOGIC: 
-            // If it's an improvement test but "Not Writing" is selected, delete any existing record
             if (currentToolConfig.isImprovement) {
                 const target = improvementMap[student.id];
                 const existing = marksMeta[student.id];
 
                 if (!target) {
-                    // Selected "Not Writing" -> Delete if exists
                     if (existing) {
-                        await api.delete(`/marks/${existing.id}`);
+                        await api.delete(`/marks/${existing.id}/`);
                     }
-                    return; // Skip saving
+                    return; 
                 }
+                scores._improvementTarget = target;
             }
             
-            // Standard check: only save if there are scores or it's a valid improvement mapping
-            if (!scores || (Object.keys(scores).length === 0 && !currentToolConfig.isImprovement)) return; 
+            const cleanScores = {};
+            Object.keys(scores).forEach(key => {
+                if (scores[key] !== undefined && scores[key] !== null && scores[key] !== '') {
+                    cleanScores[key] = scores[key];
+                }
+            });
+
+            if (Object.keys(cleanScores).length === 0 && !currentToolConfig.isImprovement) return; 
 
             const existingRecord = marksMeta[student.id];
             
             const payload = {
-                studentId: student.id,
-                courseId: selectedCourseId,
-                assessment: selectedAssessmentName,
-                scores: scores || {},
-                // Only save mapping for improvement tests
-                improvementTarget: currentToolConfig.isImprovement ? improvementMap[student.id] : undefined 
+                student: student.id,
+                course: selectedCourseId,
+                assessment_name: selectedAssessmentName,
+                scores: cleanScores,
             };
 
+            // Create a simpler ID to avoid slashes or complex chars in URL if used as PK
+            const customId = `M_${selectedCourseId}_${student.id}_${selectedAssessmentName.replace(/[^a-zA-Z0-9]/g, '')}`;
+
             if (existingRecord) {
-                await api.patch(`/marks/${existingRecord.id}`, payload);
+                await api.patch(`/marks/${existingRecord.id}/`, payload);
             } else {
-                const newId = `M_${selectedCourseId}_${student.id}_${selectedAssessmentName.replace(/\s/g, '')}`;
-                await api.post('/marks', { ...payload, id: newId });
+                // If backend expects 'id', include it, otherwise let DB auto-gen (if changed to AutoField)
+                // Since Mark model uses CharField PK, we MUST provide it or ensure backend handles it.
+                await api.post('/marks/', { ...payload, id: customId });
             }
         });
 
@@ -370,7 +378,7 @@ const MarksEntryPage = () => {
         handleLoadStudents(); 
     } catch (error) {
         console.error("Save failed", error);
-        alert("Failed to save marks.");
+        alert("Failed to save marks. Check console for details.");
     } finally {
         setLoading(false);
     }
@@ -379,8 +387,6 @@ const MarksEntryPage = () => {
   // --- CSV Handlers ---
   const handleDownloadTemplate = () => {
      if (!currentStudents.length) return;
-     
-     // Template for Improvement tests is generic since columns vary
      if (currentToolConfig.isImprovement) {
          alert("For Improvement Tests, please enter marks manually or ensure the CSV matches the selected target columns.");
          return;
@@ -406,8 +412,6 @@ const MarksEntryPage = () => {
   };
 
   const handleBulkUpload = (event) => {
-    // ... existing CSV logic, skipping for brevity as it remains mostly same 
-    // but should respect the current logic of marks
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -422,11 +426,9 @@ const MarksEntryPage = () => {
             const usn = row[0].trim();
             const student = currentStudents.find(s => s.usn === usn);
             if (student) {
-                if (currentToolConfig.isImprovement && !improvementMap[student.id]) return; // Skip if Not Writing
+                if (currentToolConfig.isImprovement && !improvementMap[student.id]) return; 
                 if (!newMarks[student.id]) newMarks[student.id] = {};
                 
-                // Note: This works for standard tests. For improvement, CSV is tricky due to dynamic cols.
-                // Assuming standard test upload:
                 if (!currentToolConfig.isImprovement) {
                     currentToolConfig.questions.forEach((q, idx) => {
                         const val = parseInt(row[idx + 2]); 
@@ -516,7 +518,7 @@ const MarksEntryPage = () => {
                     disabled={assessmentOptions.length === 0}
                 >
                      {assessmentOptions.length > 0 ? (
-                         assessmentOptions.map(tool => <option key={tool.id} value={tool.name}>{tool.name}</option>)
+                         assessmentOptions.map(tool => <option key={tool.name} value={tool.name}>{tool.name}</option>)
                      ) : (
                          <option>No assessments configured</option>
                      )}
@@ -597,7 +599,6 @@ const MarksEntryPage = () => {
                           const targetAssessment = improvementMap[student.id];
                           const isNotWriting = !targetAssessment;
                           
-                          // If target selected, get its config for columns
                           const dynamicConfig = targetAssessment ? getInternalConfig(targetAssessment) : null;
                           const total = dynamicConfig ? calculateTotal(student.id, dynamicConfig) : 0;
 
@@ -651,10 +652,10 @@ const MarksEntryPage = () => {
                       }
 
                       // --- STANDARD ASSESSMENT ROW LOGIC ---
-                      // Check for improvement
                       const impMarkRecord = improvementMarksList.find(r => 
-                          r.studentId === student.id && 
-                          r.improvementTarget === selectedAssessmentName
+                          r.student === student.id && 
+                          r.scores && 
+                          r.scores._improvementTarget === selectedAssessmentName
                       );
                       const hasImprovement = !!impMarkRecord;
                       
@@ -684,7 +685,7 @@ const MarksEntryPage = () => {
                           {/* ACTIONS */}
                           <td className="px-4 py-4 text-center border-l dark:border-gray-600">
                             <div className="flex justify-center gap-2">
-                                {/* Only show compare button if Improvement Exists for this specific assessment */}
+                                {/* Compare button */}
                                 {hasImprovement && (
                                     <button
                                         onClick={() => openComparisonModal(student)}

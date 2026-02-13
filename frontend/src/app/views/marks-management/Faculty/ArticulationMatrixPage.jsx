@@ -1,4 +1,3 @@
-// src/app/views/marks-management/Faculty/ArticulationMatrixPage.jsx
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { Icons } from '../shared/icons';
@@ -72,7 +71,11 @@ const ArticulationMatrixPage = () => {
   const [courses, setCourses] = useState([]);
   const [pos, setPos] = useState([]);
   const [psos, setPsos] = useState([]);
+  
+  // Matrix State: Maps CourseID -> Matrix Data
   const [articulationMatrix, setArticulationMatrix] = useState({});
+  // FIX: Track Database IDs for updates (CourseID -> MatrixRecordID)
+  const [matrixIds, setMatrixIds] = useState({});
 
   // Comparison States (for dirty check)
   const [initialData, setInitialData] = useState({ courses: [], matrix: {} });
@@ -103,21 +106,45 @@ const ArticulationMatrixPage = () => {
           try {
               setLoading(true);
               const [coursesRes, posRes, psosRes, matrixRes] = await Promise.all([
-                  api.get(`/courses?assignedFacultyId=${user.id}`),
-                  api.get('/pos'),
-                  api.get('/psos'),
-                  api.get('/articulationMatrix')
+                  api.get(`/courses/?assigned_faculty=${user.id}`), // Ensure filtering works
+                  api.get('/pos/'),
+                  api.get('/psos/'),
+                  // FIX: Correct Endpoint
+                  api.get('/articulation-matrix/') 
               ]);
 
               setCourses(coursesRes.data);
-              setPos(posRes.data);
-              setPsos(psosRes.data);
-              setArticulationMatrix(matrixRes.data);
+              
+              // Sort Outcomes
+              const sortById = (a, b) => {
+                  const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
+                  const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                  return numA - numB;
+              };
+              setPos(posRes.data.sort(sortById));
+              setPsos(psosRes.data.sort(sortById));
+
+              // Process Matrix Data
+              const matrixMap = {};
+              const idMap = {}; // Store record IDs
+
+              if (Array.isArray(matrixRes.data)) {
+                  matrixRes.data.forEach(item => {
+                      if (item.course) {
+                          if (item.matrix) matrixMap[item.course] = item.matrix;
+                          idMap[item.course] = item.id; // Capture ID for PATCH requests
+                      }
+                  });
+              } else {
+                  console.warn("Unexpected matrix format:", matrixRes.data);
+              }
+              setArticulationMatrix(matrixMap);
+              setMatrixIds(idMap);
 
               // Set initial state for dirty checking
               setInitialData({
                   courses: JSON.stringify(coursesRes.data),
-                  matrix: JSON.stringify(matrixRes.data)
+                  matrix: JSON.stringify(matrixMap)
               });
 
               if (coursesRes.data.length > 0) {
@@ -125,6 +152,7 @@ const ArticulationMatrixPage = () => {
               }
           } catch (error) {
               console.error("Failed to load articulation data", error);
+              showModal('error', 'Load Failed', 'Could not load course data. Please check your connection.');
           } finally {
               setLoading(false);
           }
@@ -153,10 +181,9 @@ const ArticulationMatrixPage = () => {
     allOutcomes.forEach(outcome => {
         let sum = 0;
         let count = 0;
-        // Use optional chaining for COs in case they are undefined
         (selectedCourse.cos || []).forEach(co => {
-            const value = courseMatrix[co.id]?.[outcome.id];
-            if (value && value > 0) {
+            const value = parseFloat(courseMatrix[co.id]?.[outcome.id]);
+            if (!isNaN(value) && value > 0) {
                 sum += value;
                 count++;
             }
@@ -173,9 +200,14 @@ const ArticulationMatrixPage = () => {
   const handleMatrixChange = (coId, outcomeId, value) => {
     if (!selectedCourse) return;
 
-    const correlation = parseInt(value, 10);
-    // Allow empty string to clear, otherwise clamp 1-3
-    const newCorrelation = (value === '' || isNaN(correlation)) ? '' : Math.max(1, Math.min(3, correlation));
+    // Validate 1-3
+    let newCorrelation = '';
+    if (value !== '') {
+        const num = parseInt(value, 10);
+        if (!isNaN(num)) {
+            newCorrelation = Math.max(1, Math.min(3, num));
+        }
+    }
 
     setArticulationMatrix(prevMatrix => {
         const courseMatrix = prevMatrix[selectedCourse.id] || {};
@@ -205,7 +237,7 @@ const ArticulationMatrixPage = () => {
     const handleGenerateMatrix = () => {
         if (!selectedCourse || !syllabusFile) return;
 
-        // Mock AI Generation
+        // Mock AI Generation Logic (Preserved)
         const courseMatrix = {};
         (selectedCourse.cos || []).forEach(co => {
             const coMatrix = {};
@@ -234,8 +266,7 @@ const ArticulationMatrixPage = () => {
     if (!selectedCourse) return;
     const currentCos = selectedCourse.cos || [];
     const nextNum = currentCos.length + 1;
-    
-    const newCoId = `${selectedCourse.id}.${nextNum}`; 
+    const newCoId = `${selectedCourse.id}.CO${nextNum}`; // Improved naming convention
     
     const newCo = {
         id: newCoId,
@@ -285,13 +316,29 @@ const ArticulationMatrixPage = () => {
       if (!selectedCourse) return;
 
       try {
-          await api.patch(`/courses/${selectedCourse.id}`, {
+          // 1. Save COs to Course
+          await api.patch(`/courses/${selectedCourse.id}/`, {
               cos: selectedCourse.cos
           });
 
-          await api.patch(`/articulationMatrix`, {
-              [selectedCourse.id]: articulationMatrix[selectedCourse.id]
-          });
+          // 2. Save Matrix
+          const matrixPayload = {
+              course: selectedCourse.id, // Ensure course ID is sent
+              matrix: articulationMatrix[selectedCourse.id] || {}
+          };
+          
+          // Check if we have a record ID for this course's matrix
+          const recordId = matrixIds[selectedCourse.id];
+
+          if (recordId) {
+              // Update existing using ID (FIX: Correct URL)
+              await api.patch(`/articulation-matrix/${recordId}/`, matrixPayload);
+          } else {
+              // Create new (FIX: Correct URL)
+              const res = await api.post(`/articulation-matrix/`, matrixPayload);
+              // Update local ID map with the new ID
+              setMatrixIds(prev => ({ ...prev, [selectedCourse.id]: res.data.id }));
+          }
 
           // Reset dirty state
           setInitialData({
@@ -310,8 +357,6 @@ const ArticulationMatrixPage = () => {
 
   return (
     <div className="space-y-6">
-      
-      {/* UI MODAL */}
       <CustomModal isOpen={uiModal.isOpen} onClose={closeModal} config={uiModal} />
 
       <h1 className="text-3xl font-bold text-gray-800 dark:text-white">CO-PO/PSO Articulation Matrix</h1>
@@ -404,7 +449,10 @@ const ArticulationMatrixPage = () => {
                   {(selectedCourse.cos || []).map(co => (
                     <tr key={co.id}>
                       <td className="sticky left-0 bg-white dark:bg-gray-800 px-4 py-4 text-sm font-medium text-gray-900 dark:text-white border-r dark:border-gray-600 w-64">
-                        <div className="font-bold">{co.id.includes('.') ? co.id.split('.')[1] : co.id}</div>
+                        <div className="font-bold">
+                            {/* Robust ID Display */}
+                            {co?.id?.includes && co.id.includes('.') ? co.id.split('.').pop() : (co.id || 'N/A')}
+                        </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={co.description}>{co.description}</div>
                       </td>
                       {allOutcomes.map(outcome => (
@@ -419,7 +467,7 @@ const ArticulationMatrixPage = () => {
                       ))}
                       <td className="px-3 py-4 whitespace-nowrap text-center text-sm">
                           <button onClick={() => handleDeleteCo(co.id)} className="text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400">
-                              <Icons.Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4" />
                           </button>
                       </td>
                     </tr>

@@ -1,10 +1,9 @@
-// src/app/views/marks-management/Faculty/FacultyConfigurationPage.jsx
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
 import { Icons } from '../shared/icons';
 import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
-import { X, AlertCircle, CheckCircle } from 'lucide-react'; // Added Icons for Modal
+import { X, AlertCircle, CheckCircle } from 'lucide-react';
 
 const TOOL_TYPES = ['Internal Assessment', 'Assignment', 'Semester End Exam', 'Activity', 'Improvement Test'];
 const SUB_TYPES = ['1', '2', '3', 'Other'];
@@ -32,7 +31,6 @@ const CustomModal = ({ isOpen, onClose, config }) => {
 
                 {/* Body */}
                 <div className="p-6 text-sm text-gray-600 dark:text-gray-300">
-                    {/* Render message directly if string, or as component if JSX */}
                     {typeof message === 'string' ? <p>{message}</p> : message}
                 </div>
 
@@ -87,7 +85,7 @@ const FacultyConfigurationPage = () => {
     // --- 3. UI Modal State ---
     const [uiModal, setUiModal] = useState({
         isOpen: false,
-        type: 'alert', // 'alert' (info/error), 'confirm' (action)
+        type: 'alert',
         title: '',
         message: '',
         onConfirm: null
@@ -105,11 +103,9 @@ const FacultyConfigurationPage = () => {
             if (!user) return;
             try {
                 setLoading(true);
-                const res = await api.get(`/courses?assignedFacultyId=${user.id}`);
+                // Fetch all courses
+                const res = await api.get('/courses/');
                 setCourses(res.data);
-                if (res.data.length > 0) {
-                    setSelectedCourseId(res.data[0].id);
-                }
             } catch (error) {
                 console.error("Failed to load courses", error);
             } finally {
@@ -119,56 +115,72 @@ const FacultyConfigurationPage = () => {
         fetchCourses();
     }, [user]);
 
-    // Load Configuration
+    // Filter assigned courses client-side
+    const assignedCourses = useMemo(() => {
+        if (!user || !courses.length) return [];
+        return courses.filter(c => String(c.assigned_faculty) === String(user.id));
+    }, [user, courses]);
+
+    // Auto-select first course
     useEffect(() => {
-        if (!selectedCourseId) return;
-
-        const course = courses.find(c => c.id === selectedCourseId);
-        if (course) {
-            setCoDefinitions(course.cos || []);
-            setCourseSettings(course.settings || { targetThreshold: 60, courseType: 'Theory' });
-            
-            const parsedTools = (course.assessmentTools || []).map(tool => {
-                let type = 'Internal Assessment';
-                let subType = 'Other';
-                let customName = tool.name;
-                let linkedAssessment = '';
-
-                if (tool.name === 'Semester End Exam') {
-                    type = 'Semester End Exam';
-                    subType = ''; 
-                } else if (tool.name.startsWith('Improvement Test')) {
-                    type = 'Improvement Test';
-                    // Parse linked assessment from name like "Improvement Test (Internal Assessment 1)"
-                    const match = tool.name.match(/\((.*?)\)/);
-                    if (match) linkedAssessment = match[1]; 
-                } else if (tool.name.startsWith('Activity')) {
-                    type = 'Activity';
-                    customName = tool.name.replace('Activity - ', '');
-                } else if (tool.name.startsWith('Internal Assessment')) {
-                    type = 'Internal Assessment';
-                    const part = tool.name.replace('Internal Assessment ', '');
-                    if (SUB_TYPES.includes(part)) {
-                        subType = part;
-                        customName = '';
-                    }
-                } else if (tool.name.startsWith('Assignment')) {
-                    type = 'Assignment';
-                    const part = tool.name.replace('Assignment ', '');
-                    if (SUB_TYPES.includes(part)) {
-                        subType = part;
-                        customName = '';
-                    }
-                }
-
-                return { ...tool, type, subType, customName, linkedAssessment };
-            });
-
-            setAssessmentTools(parsedTools);
+        if (assignedCourses.length > 0 && !assignedCourses.some(c => c.id === selectedCourseId)) {
+            setSelectedCourseId(assignedCourses[0].id);
+        } else if (assignedCourses.length === 0) {
+            setSelectedCourseId('');
         }
-    }, [selectedCourseId, courses]);
+    }, [assignedCourses, selectedCourseId]);
 
-    const selectedCourse = courses.find(c => c.id === selectedCourseId);
+    const selectedCourse = useMemo(() => 
+        courses.find(c => c.id === selectedCourseId), 
+    [courses, selectedCourseId]);
+
+    // Load Configuration when course changes
+    useEffect(() => {
+        if (!selectedCourse) return;
+
+        setCoDefinitions(selectedCourse.cos || []);
+        setCourseSettings(selectedCourse.settings || { targetThreshold: 60, courseType: 'Theory' });
+        
+        // Use 'assessment_tools' (snake_case) from backend
+        const toolsFromBackend = selectedCourse.assessment_tools || [];
+
+        const parsedTools = toolsFromBackend.map(tool => {
+            let type = 'Internal Assessment';
+            let subType = 'Other';
+            let customName = tool.name;
+            let linkedAssessment = '';
+
+            if (tool.name === 'Semester End Exam') {
+                type = 'Semester End Exam';
+                subType = ''; 
+            } else if (tool.name.startsWith('Improvement Test')) {
+                type = 'Improvement Test';
+                const match = tool.name.match(/\((.*?)\)/);
+                if (match) linkedAssessment = match[1]; 
+            } else if (tool.name.startsWith('Activity')) {
+                type = 'Activity';
+                customName = tool.name.replace('Activity - ', '');
+            } else if (tool.name.startsWith('Internal Assessment')) {
+                type = 'Internal Assessment';
+                const part = tool.name.replace('Internal Assessment ', '');
+                if (SUB_TYPES.includes(part)) {
+                    subType = part;
+                    customName = '';
+                }
+            } else if (tool.name.startsWith('Assignment')) {
+                type = 'Assignment';
+                const part = tool.name.replace('Assignment ', '');
+                if (SUB_TYPES.includes(part)) {
+                    subType = part;
+                    customName = '';
+                }
+            }
+
+            return { ...tool, type, subType, customName, linkedAssessment };
+        });
+
+        setAssessmentTools(parsedTools);
+    }, [selectedCourse]);
 
     // --- Handlers: CO Management ---
     const addCo = () => {
@@ -207,7 +219,6 @@ const FacultyConfigurationPage = () => {
 
     // --- Handlers: Assessment Tools ---
     const addTool = () => {
-        // Prevent duplicate default tool
         let nextNum = 1;
         while (assessmentTools.some(t => t.name === `Internal Assessment ${nextNum}`)) {
             nextNum++;
@@ -245,20 +256,11 @@ const FacultyConfigurationPage = () => {
         );
     };
 
-    const getImprovementTargets = (currentToolId) => {
-        return assessmentTools.filter(t => 
-            t.id !== currentToolId && 
-            t.type === 'Internal Assessment'
-        );
-    };
-
     const updateToolMeta = (id, field, value) => {
-        // --- DUPLICATE CHECK LOGIC ---
         if (field === 'type' || field === 'subType') {
             const toolToUpdate = assessmentTools.find(t => t.id === id);
             let proposedName = '';
             
-            // Construct proposed name
             let type = field === 'type' ? value : toolToUpdate.type;
             let subType = field === 'subType' ? value : toolToUpdate.subType;
 
@@ -280,17 +282,15 @@ const FacultyConfigurationPage = () => {
                     'Duplicate Assessment',
                     `An assessment with the name "${proposedName}" already exists. Please choose a different type or number.`
                 );
-                return; // Stop update
+                return;
             }
         }
-        // -----------------------------
 
         setAssessmentTools(tools => tools.map(t => {
             if (t.id !== id) return t;
 
             const updatedTool = { ...t, [field]: value };
 
-            // --- AUTO-POPULATE CONFIG FOR IMPROVEMENT TESTS ---
             if (field === 'linkedAssessment') {
                 const targetTool = tools.find(tool => tool.name === value);
                 if (targetTool) {
@@ -299,9 +299,7 @@ const FacultyConfigurationPage = () => {
                     updatedTool.coDistribution = JSON.parse(JSON.stringify(targetTool.coDistribution || {}));
                 }
             }
-            // --------------------------------------------------
 
-            // Reconstruct Name based on new state
             if (field === 'type' || field === 'subType' || field === 'customName' || field === 'linkedAssessment') {
                 if (updatedTool.type === 'Semester End Exam') {
                     updatedTool.name = 'Semester End Exam';
@@ -344,13 +342,13 @@ const FacultyConfigurationPage = () => {
         const errors = [];
         assessmentTools.forEach(tool => {
             if (tool.type !== 'Semester End Exam' && tool.type !== 'Activity' && tool.type !== 'Improvement Test') {
-                const allocated = Object.values(tool.coDistribution).reduce((a, b) => a + b, 0);
+                const allocated = Object.values(tool.coDistribution || {}).reduce((a, b) => a + b, 0);
                 if (allocated !== tool.maxMarks) {
-                    errors.push(<li><strong>{tool.name}</strong>: Allocated {allocated} marks, but Max Marks is {tool.maxMarks}</li>);
+                    errors.push(<li key={tool.id}><strong>{tool.name}</strong>: Allocated {allocated} marks, but Max Marks is {tool.maxMarks}</li>);
                 }
             }
             if (!tool.name || tool.name === 'Activity') {
-                errors.push(<li>An assessment tool is missing a valid name.</li>);
+                errors.push(<li key={`${tool.id}-name`}>An assessment tool is missing a valid name.</li>);
             }
         });
 
@@ -367,11 +365,16 @@ const FacultyConfigurationPage = () => {
             const payload = {
                 cos: coDefinitions,
                 settings: courseSettings,
-                assessmentTools: assessmentTools
+                assessment_tools: assessmentTools // Send as 'assessment_tools' (snake_case)
             };
 
-            await api.patch(`/courses/${selectedCourseId}`, payload);
-            setCourses(prev => prev.map(c => c.id === selectedCourseId ? { ...c, ...payload } : c));
+            await api.patch(`/courses/${selectedCourseId}/`, payload);
+            
+            // Update local state to reflect changes immediately
+            setCourses(prev => prev.map(c => 
+                c.id === selectedCourseId ? { ...c, ...payload } : c
+            ));
+            
             showModal('success', 'Saved Successfully', `Configuration for ${selectedCourse?.code} has been updated.`);
         } catch (error) {
             console.error("Failed to save configuration", error);
@@ -385,7 +388,6 @@ const FacultyConfigurationPage = () => {
     return (
         <div className="p-6 space-y-6 pb-10">
             
-            {/* Custom Modal */}
             <CustomModal isOpen={uiModal.isOpen} onClose={closeModal} config={uiModal} />
 
             {/* Header & Course Selector */}
@@ -399,9 +401,9 @@ const FacultyConfigurationPage = () => {
                         value={selectedCourseId}
                         onChange={(e) => setSelectedCourseId(e.target.value)}
                         className="block w-full sm:w-64 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 text-gray-900 font-bold dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        disabled={courses.length === 0}
+                        disabled={assignedCourses.length === 0}
                     >
-                        {courses.length > 0 ? courses.map(course => (
+                        {assignedCourses.length > 0 ? assignedCourses.map(course => (
                             <option key={course.id} value={course.id}>{course.code} - {course.name}</option>
                         )) : <option>No courses assigned</option>}
                     </select>
@@ -433,7 +435,6 @@ const FacultyConfigurationPage = () => {
                                     <div className="flex justify-between items-center">
                                         <div>
                                             <CardTitle>Course Outcomes (COs) & Syllabus Mapping</CardTitle>
-                                            <CardDescription>Define the COs and map them to the specific modules in your syllabus.</CardDescription>
                                         </div>
                                         <button onClick={addCo} className="flex items-center gap-2 px-3 py-1.5 bg-primary-50 border border-primary-200 text-primary-700 rounded-lg hover:bg-primary-100 text-sm font-bold dark:bg-primary-900/20 dark:border-primary-800 dark:text-primary-300">
                                             <Icons.PlusCircle className="h-4 w-4" /> Add CO
@@ -535,7 +536,7 @@ const FacultyConfigurationPage = () => {
                                 const isImprovement = tool.type === 'Improvement Test';
                                 
                                 const showMapping = !isSEE && !isActivity && !isImprovement;
-                                const allocated = Object.values(tool.coDistribution).reduce((a, b) => a + b, 0);
+                                const allocated = Object.values(tool.coDistribution || {}).reduce((a, b) => a + b, 0);
                                 const isBalanced = showMapping ? allocated === tool.maxMarks : true;
                                 
                                 return (
@@ -664,10 +665,10 @@ const FacultyConfigurationPage = () => {
                                                                                     type="number"
                                                                                     min="0"
                                                                                     placeholder="-"
-                                                                                    value={tool.coDistribution[co.id] || ''}
+                                                                                    value={tool.coDistribution?.[co.id] || ''}
                                                                                     onChange={(e) => updateToolCoDistribution(tool.id, co.id, e.target.value)}
                                                                                     className={`block w-full text-center rounded-md text-sm font-bold focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-800 dark:text-white ${
-                                                                                        (tool.coDistribution[co.id] > 0) 
+                                                                                        (tool.coDistribution?.[co.id] > 0) 
                                                                                             ? 'border-primary-400 bg-primary-50 text-primary-900 dark:bg-primary-900/20 dark:text-primary-100' 
                                                                                             : 'border-gray-300 text-gray-900 dark:border-gray-600'
                                                                                     }`}

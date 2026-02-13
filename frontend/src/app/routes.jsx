@@ -54,7 +54,7 @@ const routes = [
       { path: "/faculty/copo-attainment", element: <CoPoAttainmentPage /> },
       { path: "/faculty/course-reports", element: <AttainmentReportPage /> },
       { path: "/faculty/student-reports", element: <StudentReportsPage /> },
-      { path: "/faculty/student-reports/:courseId/:studentId", element: <StudentIndividualReportPage /> },
+      { path: "/faculty/reports/individual", element: <StudentIndividualReportPage /> },
       { path: "/faculty/configuration", element: <FacultyConfigurationPage /> },
 
       // --- ADMIN ROUTES ---
@@ -70,19 +70,11 @@ const routes = [
       { path: "/admin/improvement-plans", element: <ImprovementActionsPage /> },
       { path: "/admin/configuration", element: <AdminConfigurationpage /> },
 
-      // --- SUPER ADMIN ROUTES (FIXED PATHS) ---
+      // --- SUPER ADMIN ROUTES ---
       { path: "/superadmin/dashboard", element: <SuperAdminDashboard /> },
-      
-      // FIXED: Matches the "Department Management" button path
       { path: "/superadmin/departments", element: <DepartmentManagement /> },
-
-      // FIXED: Matches the "Admin Management" button path
       { path: "/superadmin/admins", element: <AdminManagement /> },
-
-      // FIXED: Matches the "Department Attainment" button path
       { path: "/superadmin/attainment", element: <DepartmentAttainmentPage /> },
-
-      // FIXED: Matches the "Reports" button path (Using Attainment page as placeholder)
       { path: "/superadmin/reports", element: <DepartmentAttainmentPage /> }
     ]
   },

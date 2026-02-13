@@ -27,12 +27,15 @@ const FacultyDashboard = () => {
 
         try {
             // 1. Fetch All Required Data in Parallel
+            // Note: The 'surveys' endpoint does not exist in your backend URLs yet, 
+            // so we catch the error to prevent the dashboard from breaking.
             const [coursesRes, studentsRes, marksRes, configRes, surveyRes] = await Promise.all([
                 api.get(`/courses?assignedFacultyId=${user.id}`), // Assigned courses
-                api.get('/students'),                             // All students (to count)
-                api.get('/marks'),                                // All marks (to calc avg)
-                api.get('/configurations/global'),                // Config for thresholds
-                api.get(`/surveys/${user.departmentId}`).catch(() => ({ data: {} })) // Dept Survey
+                api.get('/students'),                             // All students
+                api.get('/marks'),                                // All marks
+                api.get('/configurations/global'),                // Config
+                // FIX: Used user.department instead of user.departmentId
+                api.get(`/surveys/${user.department}`).catch(() => ({ data: {} })) 
             ]);
 
             const courses = coursesRes.data;
@@ -46,7 +49,8 @@ const FacultyDashboard = () => {
             // 2. Calculate Student Counts
             const counts = {};
             courses.forEach(c => {
-                counts[c.id] = allStudents.filter(s => s.courseId === c.id).length;
+                // FIX: Student model has 'courses' (Many-to-Many array), not 'courseId'
+                counts[c.id] = allStudents.filter(s => s.courses && s.courses.includes(c.id)).length;
             });
             setStudentCounts(counts);
 
@@ -62,18 +66,19 @@ const FacultyDashboard = () => {
                     };
                 }
 
-                // Calculate average percentage score (Simplified logic for dashboard)
+                // Calculate average percentage score
                 let totalScore = 0;
                 let count = 0;
                 courseMarks.forEach(record => {
-                    Object.values(record.scores).forEach(val => {
-                        totalScore += parseInt(val) || 0;
-                        count++;
-                    });
+                    if (record.scores) {
+                        Object.values(record.scores).forEach(val => {
+                            totalScore += parseInt(val) || 0;
+                            count++;
+                        });
+                    }
                 });
 
                 const avgScore = count > 0 ? totalScore / count : 0;
-                // Heuristic: Estimate max marks based on score magnitude if not strictly defined in DB
                 const maxMarksEstimate = avgScore > 25 ? 100 : (avgScore > 12 ? 20 : 15);
                 const attainedPercent = (avgScore / maxMarksEstimate) * 100;
 
@@ -86,10 +91,10 @@ const FacultyDashboard = () => {
             setCoursePerformanceData(performance);
 
             // 4. Calculate Aggregate Metrics
-            // Direct: Average of course attainment
-            const avgDirect = performance.reduce((acc, curr) => acc + curr.attained, 0) / (performance.length || 1);
+            const avgDirect = performance.length > 0 
+                ? performance.reduce((acc, curr) => acc + curr.attained, 0) / performance.length 
+                : 0;
 
-            // Indirect: Average of survey ratings (Scale 0-3 converted to %)
             let surveyTotal = 0;
             let surveyCount = 0;
             ['exitSurvey', 'employerSurvey', 'alumniSurvey'].forEach(type => {
@@ -102,7 +107,6 @@ const FacultyDashboard = () => {
             const avgSurveyRating = surveyCount > 0 ? surveyTotal / surveyCount : 0;
             const avgIndirectPercent = (avgSurveyRating / 3) * 100;
 
-            // Total: Weighted Average
             const wDirect = (config?.attainmentRules?.finalWeightage?.direct || 80) / 100;
             const wIndirect = (config?.attainmentRules?.finalWeightage?.indirect || 20) / 100;
             const total = (avgDirect * wDirect) + (avgIndirectPercent * wIndirect);
@@ -111,7 +115,7 @@ const FacultyDashboard = () => {
                 totalAttainment: Math.round(total),
                 directAttainment: Math.round(avgDirect),
                 indirectAttainment: Math.round(avgIndirectPercent),
-                coAttainmentLevel: (avgDirect / 100 * 3).toFixed(1) // Map % back to 0-3 scale
+                coAttainmentLevel: (avgDirect / 100 * 3).toFixed(1)
             });
 
         } catch (error) {
@@ -130,7 +134,10 @@ const FacultyDashboard = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Welcome, {user.name.split(' ')[1]}!</h1>
+        {/* FIX: Used user.display_name (or username) instead of user.name.split */}
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+            Welcome, {user.display_name || user.username}!
+        </h1>
         <p className="text-gray-500 dark:text-gray-400 mt-1">Here's a summary of your activities and courses.</p>
       </div>
       

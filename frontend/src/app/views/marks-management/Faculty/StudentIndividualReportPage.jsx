@@ -1,10 +1,9 @@
-// src/app/views/marks-management/Faculty/StudentIndividualReportPage.jsx
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
+import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
-import { ArrowLeft, Download, Award, TrendingUp, AlertCircle, ChevronDown } from 'lucide-react';
-import { useReactToPrint } from 'react-to-print';
+import { Loader2, User, BookOpen, Printer } from 'lucide-react';
+import { useLocation } from 'react-router-dom'; // Added useLocation
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -12,413 +11,331 @@ import {
   BarElement,
   Title,
   Tooltip,
-  Legend,
-  ArcElement,
+  Legend
 } from 'chart.js';
-import { Bar, Doughnut } from 'react-chartjs-2';
+import { Bar } from 'react-chartjs-2';
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement
-);
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const StudentIndividualReportPage = () => {
-    const { courseId, studentId } = useParams();
-    const navigate = useNavigate();
-    const componentRef = useRef(null);
-
-    const [student, setStudent] = useState(null);
-    const [course, setCourse] = useState(null);
-    const [department, setDepartment] = useState(null); // New state for Department Name
-    const [marks, setMarks] = useState([]);
+    const { user } = useAuth();
+    const location = useLocation(); // Hook for params
     const [loading, setLoading] = useState(true);
-    
-    const [chartView, setChartView] = useState('assessment');
 
-    const handlePrint = useReactToPrint({
-        contentRef: componentRef,
-        documentTitle: `Student_Report_${studentId}`,
-    });
+    // Data States
+    const [courses, setCourses] = useState([]);
+    const [allStudents, setAllStudents] = useState([]);
+    const [allMarks, setAllMarks] = useState([]);
 
+    // Selection States
+    const [selectedCourseId, setSelectedCourseId] = useState('');
+    const [selectedStudentId, setSelectedStudentId] = useState('');
+
+    // 1. Fetch Data
     useEffect(() => {
         const fetchData = async () => {
+            if (!user) return;
             setLoading(true);
             try {
-                // 1. Fetch Basic Data
-                const [studentRes, courseRes, marksRes] = await Promise.all([
-                    api.get(`/students?id=${studentId}`),
-                    api.get(`/courses?id=${courseId}`),
-                    api.get(`/marks?courseId=${courseId}&studentId=${studentId}`)
+                const [coursesRes, studentsRes, marksRes] = await Promise.all([
+                    api.get('/courses/'),
+                    api.get('/students/'),
+                    api.get('/marks/')
                 ]);
-
-                setStudent(studentRes.data[0]);
-                setCourse(courseRes.data[0]);
-                setMarks(marksRes.data);
-
-                // 2. Fetch Department Name if course exists
-                if (courseRes.data[0]?.departmentId) {
-                    const deptRes = await api.get(`/departments?id=${courseRes.data[0].departmentId}`);
-                    setDepartment(deptRes.data[0]);
-                }
-
+                setCourses(coursesRes.data);
+                setAllStudents(studentsRes.data);
+                setAllMarks(marksRes.data);
             } catch (error) {
-                console.error("Failed to load report data", error);
+                console.error("Failed to load data", error);
             } finally {
                 setLoading(false);
             }
         };
+        fetchData();
+    }, [user]);
 
-        if (courseId && studentId) fetchData();
-    }, [courseId, studentId]);
+    // 2. Filter Courses
+    const assignedCourses = useMemo(() => {
+        if (!user || !courses.length) return [];
+        return courses.filter(c => String(c.assigned_faculty) === String(user.id));
+    }, [user, courses]);
 
+    // 3. Filter Students for Course
+    const courseStudents = useMemo(() => {
+        if (!selectedCourseId) return [];
+        return allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
+    }, [selectedCourseId, allStudents]);
+
+    // Auto-select course (Priority to Location State)
+    useEffect(() => {
+        // Check if data came from navigation
+        if (location.state?.courseId && assignedCourses.some(c => c.id === location.state.courseId)) {
+            setSelectedCourseId(location.state.courseId);
+        } 
+        // Fallback to first course if nothing selected
+        else if (assignedCourses.length > 0 && !selectedCourseId) {
+            setSelectedCourseId(assignedCourses[0].id);
+        }
+    }, [assignedCourses, location.state]); // Added location.state dep
+
+    // Auto-select student (Priority to Location State)
+    useEffect(() => {
+        // Check if data came from navigation AND matches current course
+        if (location.state?.studentId && location.state?.courseId === selectedCourseId) {
+             // Verify student belongs to this course
+             if (courseStudents.some(s => s.id === location.state.studentId)) {
+                 setSelectedStudentId(location.state.studentId);
+                 return; // Skip fallback
+             }
+        }
+
+        // Fallback to first student
+        if (courseStudents.length > 0 && !selectedStudentId) {
+            setSelectedStudentId(courseStudents[0].id);
+        } else if (courseStudents.length === 0) {
+            setSelectedStudentId('');
+        }
+    }, [courseStudents, location.state, selectedCourseId]);
+
+    const selectedCourse = courses.find(c => c.id === selectedCourseId);
+    const selectedStudent = courseStudents.find(s => s.id === selectedStudentId);
+
+    // 4. Generate Report Data
     const reportData = useMemo(() => {
-        if (!course || !marks) return null;
+        if (!selectedCourse || !selectedStudent) return null;
 
-        const assessmentData = [];
-        let totalObtained = 0;
-        let totalMax = 0;
+        const tools = selectedCourse.assessment_tools || [];
+        const studentMarks = allMarks.filter(m => m.student === selectedStudent.id && m.course === selectedCourseId);
 
-        const coList = course.cos ? course.cos.map(c => c.id) : [];
+        const assessments = tools.map(tool => {
+            const record = studentMarks.find(m => m.assessment_name === tool.name);
+            const scores = record?.scores || {};
+            const totalObtained = Object.values(scores).reduce((a, b) => a + (parseInt(b)||0), 0);
+            
+            const breakdown = [];
+            if (tool.coDistribution) {
+                Object.entries(tool.coDistribution).forEach(([coId, max]) => {
+                    breakdown.push({
+                        label: coId,
+                        max: parseInt(max),
+                        obtained: parseInt(scores[coId] || 0)
+                    });
+                });
+            } else {
+                breakdown.push({
+                    label: 'Total',
+                    max: tool.maxMarks,
+                    obtained: totalObtained
+                });
+            }
 
-        const seenTools = new Set();
-        const uniqueTools = (course.assessmentTools || []).filter(tool => {
-            const isDuplicate = seenTools.has(tool.name);
-            seenTools.add(tool.name);
-            return !isDuplicate;
+            return {
+                name: tool.name,
+                type: tool.type,
+                max: tool.maxMarks,
+                obtained: totalObtained,
+                breakdown
+            };
         });
 
-        const getPreciseScore = (scoreRecord, tool) => {
-            if (!scoreRecord || !scoreRecord.scores) return 0;
-            let validKeys = [];
-            if (tool.type === 'Semester End Exam') validKeys = ['External'];
-            else if (tool.type === 'Activity') validKeys = ['Score'];
-            else validKeys = Object.keys(tool.coDistribution || {});
+        const cos = selectedCourse.cos || [];
+        const coPerformance = cos.map(co => {
+            let coTotalMax = 0;
+            let coTotalObtained = 0;
 
-            return validKeys.reduce((sum, key) => {
-                const val = parseInt(scoreRecord.scores[key]);
-                return sum + (isNaN(val) ? 0 : val);
-            }, 0);
-        };
-
-        const findImprovementScore = (targetName) => {
-            const impTestRecord = marks.find(m => 
-                (m.assessment === 'Improvement Test' || m.assessment.startsWith('Improvement')) && 
-                m.improvementTarget === targetName
-            );
-            if (!impTestRecord) return null;
-            const targetTool = uniqueTools.find(t => t.name === targetName);
-            if (!targetTool) return 0;
-            return getPreciseScore(impTestRecord, targetTool);
-        };
-
-        const standardTools = uniqueTools.filter(t => t.type !== 'Improvement Test');
-
-        standardTools.forEach(tool => {
-            const record = marks.find(m => m.assessment === tool.name);
-            const originalScore = getPreciseScore(record, tool);
-            const improvementScore = findImprovementScore(tool.name);
-            
-            const finalScore = originalScore; 
-
-            const coBreakdown = {};
-            coList.forEach(coId => {
-                if (tool.coDistribution && tool.coDistribution[coId] !== undefined) {
-                    coBreakdown[coId] = record?.scores?.[coId] ?? '-';
-                } else {
-                    coBreakdown[coId] = ''; 
+            tools.forEach(tool => {
+                if (tool.coDistribution && tool.coDistribution[co.id]) {
+                    const record = studentMarks.find(m => m.assessment_name === tool.name);
+                    const max = parseInt(tool.coDistribution[co.id]);
+                    const obtained = parseInt(record?.scores?.[co.id] || 0);
+                    
+                    coTotalMax += max;
+                    coTotalObtained += obtained;
                 }
             });
 
-            assessmentData.push({
-                name: tool.name,
-                type: tool.type,
-                obtained: finalScore, 
-                original: originalScore,
-                improvement: improvementScore,
-                max: tool.maxMarks,
-                percentage: tool.maxMarks > 0 ? (finalScore / tool.maxMarks) * 100 : 0,
-                coBreakdown,
-                coDistribution: tool.coDistribution
-            });
-
-            totalObtained += finalScore;
-            totalMax += tool.maxMarks;
+            const percentage = coTotalMax > 0 ? (coTotalObtained / coTotalMax) * 100 : 0;
+            return {
+                co: co.id,
+                percentage: percentage
+            };
         });
 
-        const overallPercentage = totalMax > 0 ? (totalObtained / totalMax) * 100 : 0;
-        
-        const iaData = assessmentData.filter(d => d.type === 'Internal Assessment');
+        return { assessments, coPerformance };
 
-        let chartLabels = [];
-        let chartValues = [];
-        let pieLabels = [];
-        let pieValues = [];
+    }, [selectedCourse, selectedStudent, allMarks, selectedCourseId]);
 
-        if (chartView === 'assessment') {
-            chartLabels = iaData.map(d => d.name);
-            chartValues = iaData.map(d => d.percentage);
-            pieLabels = iaData.map(d => d.name);
-            pieValues = iaData.map(d => d.obtained);
-        } else {
-            const coStats = {}; 
-            iaData.forEach(row => {
-                Object.entries(row.coDistribution || {}).forEach(([coId, maxMarks]) => {
-                    if (!coStats[coId]) coStats[coId] = { obtained: 0, max: 0 };
-                    const obtained = parseInt(row.coBreakdown[coId]);
-                    const max = parseInt(maxMarks);
-                    if (!isNaN(obtained)) coStats[coId].obtained += obtained;
-                    if (!isNaN(max)) coStats[coId].max += max;
-                });
-            });
-            const sortedCos = Object.keys(coStats).sort();
-            chartLabels = sortedCos;
-            chartValues = sortedCos.map(co => {
-                const { obtained, max } = coStats[co];
-                return max > 0 ? (obtained / max) * 100 : 0;
-            });
-            pieLabels = chartLabels;
-            pieValues = sortedCos.map(co => coStats[co].obtained);
-        }
+    const chartData = useMemo(() => {
+        if (!reportData) return null;
 
-        const barChartData = {
-            labels: chartLabels,
+        return {
+            labels: reportData.coPerformance.map(item => item.co.includes('.') ? item.co.split('.')[1] : item.co),
             datasets: [{
-                label: chartView === 'assessment' ? 'Score (%)' : 'CO Attainment (%)',
-                data: chartValues,
+                label: 'Student Attainment %',
+                data: reportData.coPerformance.map(item => item.percentage),
                 backgroundColor: 'rgba(59, 130, 246, 0.8)',
                 borderRadius: 4,
-            }],
+            }]
         };
+    }, [reportData]);
 
-        const pieChartData = {
-            labels: pieLabels,
-            datasets: [{
-                data: pieValues,
-                backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'],
-                borderWidth: 0,
-            }],
-        };
+    const handlePrint = () => {
+        window.print();
+    };
 
-        return { 
-            assessmentData, 
-            totalObtained, 
-            totalMax, 
-            overallPercentage, 
-            barChartData, 
-            pieChartData,
-            coList 
-        };
-    }, [course, marks, chartView]);
-
-    if (loading) return <div className="p-12 text-center">Loading Report...</div>;
-    if (!student || !course) return <div className="p-12 text-center">Data not found.</div>;
+    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
 
     return (
-        <div className="p-6 space-y-6">
-            <div className="flex justify-between items-center print:hidden">
-                <button 
-                    onClick={() => navigate(-1)} 
-                    className="flex items-center text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
-                >
-                    <ArrowLeft className="w-4 h-4 mr-2" /> Back to List
-                </button>
-                <button 
-                    onClick={handlePrint}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 shadow-sm transition-colors"
-                >
-                    <Download className="w-4 h-4" /> Export PDF / Print
-                </button>
+        <div className="space-y-6 print:space-y-4">
+            {/* Controls */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center print:hidden">
+                <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Individual Student Report</h1>
+                
+                <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <select 
+                        value={selectedCourseId}
+                        onChange={(e) => {
+                            setSelectedCourseId(e.target.value);
+                            setSelectedStudentId(''); // Reset student when course changes manually
+                        }}
+                        className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    >
+                        {assignedCourses.map(c => <option key={c.id} value={c.id}>{c.code}</option>)}
+                    </select>
+
+                    <select 
+                        value={selectedStudentId}
+                        onChange={(e) => setSelectedStudentId(e.target.value)}
+                        className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:w-64"
+                        disabled={!courseStudents.length}
+                    >
+                        {courseStudents.map(s => <option key={s.id} value={s.id}>{s.usn} - {s.name}</option>)}
+                        {!courseStudents.length && <option>No students</option>}
+                    </select>
+
+                    <button 
+                        onClick={handlePrint}
+                        className="flex items-center justify-center px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-900 transition-colors"
+                    >
+                        <Printer className="w-4 h-4 mr-2" /> Print
+                    </button>
+                </div>
             </div>
 
-            <div ref={componentRef} className="space-y-6 p-4 bg-white dark:bg-gray-900 print:p-8 print:bg-white" id="printable-report">
-                
-                {/* --- 1. UPDATED HEADER WITH LOGOS --- */}
-                <div className="hidden print:flex justify-between items-center mb-6 border-b pb-4">
-                 {/* Left Logo */}
-                  <div className="w-24 h-24 flex items-center justify-center">
-                      <img 
-                          src="https://kssem.edu.in/img/logo.jpg" // PASTE YOUR LINK HERE
-                          alt="KS Group Logo" 
-                          className="max-h-full max-w-full object-contain"
-                          onError={(e) => { e.target.style.display='none'; }} 
-                       />
-                   </div>
-
-                    {/* Center Title */}
-                    <div className="text-center flex-1 px-4">
-                        <h1 className="text-xl font-bold uppercase tracking-wide">
-                            Department of {department ? department.name : course.departmentId}
-                        </h1>
-                        <h2 className="text-lg font-medium text-gray-700 mt-1">Individual Student Assessment Report</h2>
-                        <p className="text-sm text-gray-500 mt-1">Academic Year 2023-2024</p>
-                    </div>
-
-                    {/* Right Logo */}
-                    <div className="w-24 h-24 flex items-center justify-center">
-                        <img 
-                            src="https://vtu.ac.in/wp-content/uploads/2019/03/vtul-291x300.png" // PASTE YOUR LINK HERE
-                            alt="KSSEM Logo" 
-                            className="max-h-full max-w-full object-contain"
-                            onError={(e) => { e.target.style.display='none'; }}
-                        />
-                        </div>
-                    </div>
-
-                <Card className="border-t-4 border-t-primary-600 shadow-sm">
-                    <CardContent className="p-6">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
-                            <div>
-                                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{student.name}</h1>
-                                <p className="text-gray-500 font-mono text-lg">{student.usn}</p>
-                                <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">
-                                    Course: <span className="font-bold">{course.code} - {course.name}</span>
-                                </p>
-                            </div>
-                            <div className="mt-4 md:mt-0 text-right">
-                                <div className="inline-flex flex-col items-end">
-                                    <span className="text-sm text-gray-500 uppercase tracking-wider">Overall Performance</span>
-                                    <span className={`text-3xl font-extrabold ${reportData.overallPercentage >= 60 ? 'text-green-600' : reportData.overallPercentage >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
-                                        {reportData.overallPercentage.toFixed(2)}%
-                                    </span>
-                                    <span className="text-xs text-gray-400">
-                                        {reportData.totalObtained} / {reportData.totalMax} Total Marks
-                                    </span>
+            {selectedCourse && selectedStudent && reportData ? (
+                <div className="space-y-6">
+                    {/* Header Info */}
+                    <Card className="print:shadow-none print:border-gray-300">
+                        <CardContent className="pt-6">
+                            <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                                <div className="flex items-center gap-4">
+                                    <div className="h-16 w-16 bg-gray-100 rounded-full flex items-center justify-center text-gray-400">
+                                        <User className="h-8 w-8" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{selectedStudent.name}</h2>
+                                        <p className="text-sm text-gray-500 font-mono">{selectedStudent.usn}</p>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <h3 className="text-lg font-semibold text-gray-800 dark:text-white">{selectedCourse.name}</h3>
+                                    <p className="text-sm text-gray-500">{selectedCourse.code} | {selectedCourse.credits} Credits</p>
                                 </div>
                             </div>
+                        </CardContent>
+                    </Card>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Assessment Table */}
+                        <div className="lg:col-span-2">
+                            <Card className="h-full print:shadow-none print:border-gray-300">
+                                <CardHeader>
+                                    <CardTitle>Assessment Performance</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                                            <thead className="bg-gray-50 dark:bg-gray-700/50">
+                                                <tr>
+                                                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase">Assessment</th>
+                                                    <th className="px-4 py-3 text-center font-medium text-gray-500 uppercase">Max</th>
+                                                    <th className="px-4 py-3 text-center font-medium text-gray-500 uppercase">Obtained</th>
+                                                    <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase">Breakdown (COs)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                                {reportData.assessments.map((tool, idx) => (
+                                                    <tr key={idx}>
+                                                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{tool.name}</td>
+                                                        <td className="px-4 py-3 text-center text-gray-500">{tool.max}</td>
+                                                        <td className="px-4 py-3 text-center font-bold text-gray-900 dark:text-white">{tool.obtained}</td>
+                                                        <td className="px-4 py-3 text-gray-500">
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {tool.breakdown.map((b, i) => (
+                                                                    <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200">
+                                                                        {b.label}: {b.obtained}/{b.max}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </CardContent>
+                            </Card>
                         </div>
-                    </CardContent>
-                </Card>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 print:break-inside-avoid">
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between pb-2">
-                            <CardTitle>Internal Assessment Analysis</CardTitle>
-                            <div className="relative print:hidden">
-                                <select
-                                    value={chartView}
-                                    onChange={(e) => setChartView(e.target.value)}
-                                    className="appearance-none bg-gray-50 border border-gray-300 text-gray-700 text-xs rounded-md focus:ring-primary-500 focus:border-primary-500 block w-full p-1.5 pr-6 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white"
-                                >
-                                    <option value="assessment">By Assessment</option>
-                                    <option value="co">By COs</option>
-                                </select>
-                                <ChevronDown className="absolute right-1.5 top-2 w-3 h-3 text-gray-500 pointer-events-none" />
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="h-64 flex justify-center">
-                                <Bar 
-                                    data={reportData.barChartData} 
-                                    options={{
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        scales: { y: { beginAtZero: true, max: 100 } }
-                                    }} 
-                                />
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Score Contribution (IA Only)</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                             <div className="h-64 flex justify-center">
-                                <Doughnut 
-                                    data={reportData.pieChartData} 
-                                    options={{
-                                        responsive: true,
-                                        maintainAspectRatio: false,
-                                        plugins: { legend: { position: 'right' } }
-                                    }}
-                                />
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
-
-                <Card className="print:shadow-none print:border-none">
-                    <CardHeader className="print:hidden">
-                        <CardTitle>Detailed Marks Statement</CardTitle>
-                    </CardHeader>
-                    <CardContent className="print:p-0">
-                        <div className="overflow-x-auto border rounded-lg dark:border-gray-700 print:border-gray-300">
-                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-                                <thead className="bg-gray-50 dark:bg-gray-700/50 print:bg-gray-100">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left font-medium text-gray-500 uppercase border-r print:text-black">Assessment</th>
-                                        <th className="px-4 py-3 text-center font-medium text-gray-500 uppercase border-r print:text-black">Max</th>
-                                        {reportData.coList.map(co => (
-                                            <th key={co} className="px-3 py-3 text-center font-medium text-gray-500 uppercase border-r print:text-black">
-                                                {co}
-                                            </th>
-                                        ))}
-                                        <th className="px-4 py-3 text-center font-medium text-gray-500 uppercase border-r print:text-black">Orig</th>
-                                        <th className="px-4 py-3 text-center font-medium text-gray-500 uppercase border-r print:text-black">Imp</th>
-                                        <th className="px-4 py-3 text-center font-medium text-gray-500 uppercase border-r print:text-black">Final</th>
-                                        <th className="px-4 py-3 text-center font-medium text-gray-500 uppercase print:text-black">Result</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                    {reportData.assessmentData.map((row, i) => (
-                                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 print:hover:bg-transparent">
-                                            <td className="px-4 py-3 font-medium text-gray-900 dark:text-white border-r">{row.name}</td>
-                                            <td className="px-4 py-3 text-center text-gray-500 border-r">{row.max}</td>
-                                            {reportData.coList.map(co => (
-                                                <td key={co} className="px-3 py-3 text-center text-gray-700 border-r dark:text-gray-300">
-                                                    {row.coBreakdown[co] !== '' ? row.coBreakdown[co] : ''}
-                                                </td>
-                                            ))}
-                                            <td className="px-4 py-3 text-center text-gray-800 border-r">{row.original}</td>
-                                            <td className="px-4 py-3 text-center text-gray-500 border-r">
-                                                {row.improvement !== null ? (
-                                                    <span className="text-purple-600 font-medium">{row.improvement}</span>
-                                                ) : '-'}
-                                            </td>
-                                            <td className="px-4 py-3 text-center font-bold text-gray-800 dark:text-white border-r">
-                                                {row.obtained} 
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                                                    row.percentage >= 40 ? 'bg-green-100 text-green-800 print:text-green-800' : 'bg-red-100 text-red-800 print:text-red-800'
-                                                }`}>
-                                                    {row.percentage >= 40 ? 'PASS' : 'FAIL'}
+                        {/* Chart */}
+                        <div className="lg:col-span-1">
+                            <Card className="h-full print:shadow-none print:border-gray-300">
+                                <CardHeader>
+                                    <CardTitle>CO Attainment Profile</CardTitle>
+                                    <CardDescription>Performance percentage per CO.</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="h-64">
+                                        <Bar 
+                                            data={chartData} 
+                                            options={{
+                                                responsive: true,
+                                                maintainAspectRatio: false,
+                                                scales: {
+                                                    y: { beginAtZero: true, max: 100 }
+                                                },
+                                                plugins: { legend: { display: false } }
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="mt-4 space-y-2">
+                                        {reportData.coPerformance.map(co => (
+                                            <div key={co.co} className="flex items-center justify-between text-sm">
+                                                <span className="font-medium text-gray-700 dark:text-gray-300">
+                                                    {co.co.includes('.') ? co.co.split('.')[1] : co.co}
                                                 </span>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    <tr className="bg-gray-100 dark:bg-gray-800 font-bold border-t-2 border-gray-300">
-                                        <td className="px-4 py-3 border-r">TOTAL</td>
-                                        <td className="px-4 py-3 text-center border-r">{reportData.totalMax}</td>
-                                        {reportData.coList.map(co => <td key={co} className="border-r"></td>)}
-                                        <td className="px-4 py-3 text-center border-r">-</td>
-                                        <td className="px-4 py-3 text-center border-r">-</td>
-                                        <td className="px-4 py-3 text-center text-primary-700">{reportData.totalObtained}</td>
-                                        <td className="px-4 py-3 text-center">
-                                            {reportData.overallPercentage.toFixed(2)}%
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                                                <div className="flex-1 mx-3 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                    <div 
+                                                        className="h-full bg-blue-500 rounded-full" 
+                                                        style={{ width: `${co.percentage}%` }}
+                                                    />
+                                                </div>
+                                                <span className="text-gray-500">{co.percentage.toFixed(0)}%</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </CardContent>
+                            </Card>
                         </div>
-                    </CardContent>
-                </Card>
-
-                <div className="hidden print:block mt-12 pt-8 border-t border-gray-300 text-center text-xs text-gray-500">
-                    <div className="flex justify-between px-8 mb-8">
-                        <div><p>____________________</p><p>Faculty Signature</p></div>
-                        <div><p>____________________</p><p>HOD Signature</p></div>
-                        <div><p>____________________</p><p>Principal Signature</p></div>
                     </div>
-                    <p>Generated by OBE Management System on {new Date().toLocaleDateString()}</p>
                 </div>
-            </div>
+            ) : (
+                <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
+                    <BookOpen className="mx-auto h-12 w-12 text-gray-400 mb-2" />
+                    <h3 className="text-lg font-medium">Select a Student</h3>
+                    <p className="text-gray-500">Please select a course and student to generate the report.</p>
+                </div>
+            )}
         </div>
     );
 };

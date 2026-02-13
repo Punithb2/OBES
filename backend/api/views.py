@@ -1,8 +1,9 @@
 from rest_framework import viewsets, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from .models import ArticulationMatrix, Configuration, ProgramOutcome, ProgramSpecificOutcome, User, Department, Course, Student, Mark
-from .serializers import ArticulationMatrixSerializer, ConfigurationSerializer, ProgramOutcomeSerializer, ProgramSpecificOutcomeSerializer, UserSerializer, DepartmentSerializer, CourseSerializer, StudentSerializer, MarkSerializer
+from rest_framework.views import APIView
+from .models import ArticulationMatrix, Configuration, ProgramOutcome, ProgramSpecificOutcome, User, Department, Course, Student, Mark, Survey
+from .serializers import ArticulationMatrixSerializer, ConfigurationSerializer, ProgramOutcomeSerializer, ProgramSpecificOutcomeSerializer, UserSerializer, DepartmentSerializer, CourseSerializer, StudentSerializer, MarkSerializer, SurveySerializer
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
@@ -58,6 +59,14 @@ class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
 
+    def get_queryset(self):
+        queryset = Course.objects.all()
+        # Filter by assigned faculty if parameter is provided
+        assigned_faculty_id = self.request.query_params.get('assignedFacultyId')
+        if assigned_faculty_id:
+            queryset = queryset.filter(assigned_faculty__id=assigned_faculty_id)
+        return queryset
+
 class StudentViewSet(viewsets.ModelViewSet):
     queryset = Student.objects.all()
     serializer_class = StudentSerializer
@@ -94,3 +103,15 @@ class ConfigurationViewSet(viewsets.ModelViewSet):
 class ArticulationMatrixViewSet(viewsets.ModelViewSet):
     queryset = ArticulationMatrix.objects.all()
     serializer_class = ArticulationMatrixSerializer
+
+class SurveyViewSet(viewsets.ModelViewSet):
+    queryset = Survey.objects.all()
+    serializer_class = SurveySerializer
+
+    def get_queryset(self):
+        queryset = Survey.objects.all()
+        # Allow filtering by department: /api/surveys/?department=D01
+        dept_id = self.request.query_params.get('department')
+        if dept_id:
+            queryset = queryset.filter(department=dept_id)
+        return queryset

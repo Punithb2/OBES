@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Department, Course, Student, Mark, ArticulationMatrix, Configuration, ProgramOutcome, ProgramSpecificOutcome
+from .models import User, Department, Course, Student, Mark, ArticulationMatrix, Configuration, ProgramOutcome, ProgramSpecificOutcome, Survey
 
 class DepartmentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -58,3 +58,8 @@ class ArticulationMatrixSerializer(serializers.ModelSerializer):
     class Meta:
         model = ArticulationMatrix
         fields = '__all__'
+
+class SurveySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Survey
+        fields = ['id', 'department', 'exit_survey', 'employer_survey', 'alumni_survey', 'updated_at']

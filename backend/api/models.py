@@ -97,3 +97,16 @@ class Configuration(models.Model):
 class ArticulationMatrix(models.Model):
     course = models.OneToOneField(Course, on_delete=models.CASCADE, primary_key=True)
     matrix = models.JSONField(default=dict) # { "CO1": { "PO1": 3, "PO2": 2 } }
+
+class Survey(models.Model):
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="surveys")
+    # Store ratings as JSON: { "PO1": 2.5, "PO2": 3.0 }
+    exit_survey = models.JSONField(default=dict, blank=True)
+    employer_survey = models.JSONField(default=dict, blank=True)
+    alumni_survey = models.JSONField(default=dict, blank=True)
+    
+    # Metadata
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Surveys - {self.department.name}"

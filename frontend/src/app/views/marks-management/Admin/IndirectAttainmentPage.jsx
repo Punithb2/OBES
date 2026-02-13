@@ -95,9 +95,9 @@ const IndirectAttainmentPage = () => {
                     const existingData = surveyRes.data[0];
                     setSurveyId(existingData.id); // Save ID for PUT/PATCH later
                     setSurveyRatings({
-                        exitSurvey: existingData.exitSurvey || {},
-                        employerSurvey: existingData.employerSurvey || {},
-                        alumniSurvey: existingData.alumniSurvey || {}
+                        exitSurvey: existingData.exit_survey || {},
+                        employerSurvey: existingData.employer_survey || {},
+                        alumniSurvey: existingData.alumni_survey || {}
                     });
                 } else {
                     console.log("No existing survey data found, starting fresh.");
@@ -133,9 +133,9 @@ const IndirectAttainmentPage = () => {
 
         const payload = {
             department: user.department,
-            exitSurvey: surveyRatings.exitSurvey,
-            employerSurvey: surveyRatings.employerSurvey,
-            alumniSurvey: surveyRatings.alumniSurvey
+            exit_survey: surveyRatings.exitSurvey,
+            employer_survey: surveyRatings.employerSurvey,
+            alumni_survey: surveyRatings.alumniSurvey
         };
 
         try {

@@ -9,11 +9,11 @@ router.register(r'departments', DepartmentViewSet)
 router.register(r'courses', CourseViewSet)
 router.register(r'students', StudentViewSet)
 router.register(r'marks', MarkViewSet)
-# New Endpoints
 router.register(r'pos', ProgramOutcomeViewSet)
 router.register(r'psos', ProgramSpecificOutcomeViewSet)
 router.register(r'configurations', ConfigurationViewSet)
-router.register(r'articulationMatrix', ArticulationMatrixViewSet)
+router.register(r'articulation-matrix', ArticulationMatrixViewSet)
+router.register(r'surveys', SurveyViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
