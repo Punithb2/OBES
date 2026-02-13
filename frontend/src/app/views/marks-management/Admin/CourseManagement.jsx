@@ -3,14 +3,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../sh
 import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
 import { Icons } from '../shared/icons';
+import { Loader2 } from 'lucide-react'; 
 
 // --- 1. COURSE MODAL COMPONENT ---
-const CourseModal = ({ isOpen, onClose, onSave, course = null }) => {
+const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) => {
     const [formData, setFormData] = useState({ 
         code: '', 
         name: '', 
         semester: 1, 
-        credits: 3 
+        credits: 3,
+        scheme: '' // New Field
     });
 
     useEffect(() => {
@@ -19,12 +21,20 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null }) => {
                 code: course.code, 
                 name: course.name, 
                 semester: course.semester,
-                credits: course.credits
+                credits: course.credits,
+                scheme: course.scheme || '' // Handle existing courses without scheme
             });
         } else {
-            setFormData({ code: '', name: '', semester: 1, credits: 3 });
+            // Set default scheme if available (defaults to the first one)
+            setFormData({ 
+                code: '', 
+                name: '', 
+                semester: 1, 
+                credits: 3, 
+                scheme: schemes.length > 0 ? schemes[0].id : '' 
+            });
         }
-    }, [course, isOpen]);
+    }, [course, isOpen, schemes]);
 
     if (!isOpen) return null;
 
@@ -34,7 +44,7 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm transition-opacity">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm transition-opacity animate-in fade-in">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4 transform transition-all scale-100">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white">
@@ -46,20 +56,22 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null }) => {
                 </div>
                 
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* Course Code & Credits */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Course Code</label>
+                            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Course Code <span className="text-red-500">*</span></label>
                             <input 
                                 required
                                 type="text" 
                                 value={formData.code}
-                                onChange={e => setFormData({...formData, code: e.target.value})}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm"
+                                onChange={e => setFormData({...formData, code: e.target.value.toUpperCase()})}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm font-mono uppercase"
                                 placeholder="e.g. 18CS51"
+                                disabled={!!course} // Disable code editing if editing existing course (as it is often the ID)
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Credits</label>
+                            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Credits <span className="text-red-500">*</span></label>
                             <input 
                                 required
                                 type="number" 
@@ -72,20 +84,39 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null }) => {
                         </div>
                     </div>
 
+                    {/* Course Name */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Course Name</label>
+                        <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Course Name <span className="text-red-500">*</span></label>
                         <input 
                             required
                             type="text" 
                             value={formData.name}
                             onChange={e => setFormData({...formData, name: e.target.value})}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm"
-                            placeholder="e.g. Management and Entrepreneurship"
+                            placeholder="e.g. Machine Learning"
                         />
                     </div>
 
+                    {/* Scheme Selection (NEW) */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Semester</label>
+                        <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Academic Scheme <span className="text-red-500">*</span></label>
+                        <select 
+                            required
+                            value={formData.scheme}
+                            onChange={e => setFormData({...formData, scheme: e.target.value})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm"
+                        >
+                            <option value="">-- Select Scheme --</option>
+                            {schemes.map(s => (
+                                <option key={s.id} value={s.id}>{s.name} ({s.id})</option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">Determines calculation rules (Pass criteria, Attainment Levels).</p>
+                    </div>
+
+                    {/* Semester */}
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Semester <span className="text-red-500">*</span></label>
                         <select 
                             value={formData.semester}
                             onChange={e => setFormData({...formData, semester: parseInt(e.target.value)})}
@@ -97,19 +128,19 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null }) => {
                         </select>
                     </div>
                     
-                    <div className="flex justify-end space-x-3 mt-6 pt-2">
+                    <div className="flex justify-end space-x-3 mt-6 pt-2 border-t dark:border-gray-700">
                         <button 
                             type="button" 
                             onClick={onClose} 
-                            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200"
+                            className="px-4 py-2 text-sm font-bold text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 transition-colors"
                         >
                             Cancel
                         </button>
                         <button 
                             type="submit" 
-                            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700"
+                            className="px-4 py-2 text-sm font-bold text-white bg-primary-600 rounded-md hover:bg-primary-700 shadow-sm transition-colors"
                         >
-                            Save
+                            Save Course
                         </button>
                     </div>
                 </form>
@@ -122,30 +153,42 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null }) => {
 const CourseManagement = () => {
     const { user } = useAuth();
     const [courses, setCourses] = useState([]);
+    const [schemes, setSchemes] = useState([]); // Store schemes
     const [loading, setLoading] = useState(true);
     
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedCourse, setSelectedCourse] = useState(null);
 
-    const fetchCourses = async () => {
+    // Fetch Data
+    const fetchData = async () => {
         if (!user || !user.department) return;
 
         try {
             setLoading(true);
-            // Filter by 'departmentId' to match the CourseViewSet logic
-            const response = await api.get(`/courses/?departmentId=${user.department}`);
-            setCourses(response.data);
+            const [coursesRes, schemesRes] = await Promise.all([
+                api.get(`/courses/?departmentId=${user.department}`),
+                api.get('/schemes/')
+            ]);
+            
+            setCourses(coursesRes.data);
+            setSchemes(schemesRes.data);
         } catch (error) {
-            console.error("Failed to fetch courses", error);
+            console.error("Failed to fetch data", error);
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchCourses();
+        fetchData();
     }, [user]);
+
+    // Helpers
+    const getSchemeName = (schemeId) => {
+        const s = schemes.find(sc => sc.id === schemeId);
+        return s ? s.name : <span className="text-red-400 italic font-bold text-xs">Not Assigned</span>;
+    };
 
     const openAddModal = () => {
         setSelectedCourse(null);
@@ -179,43 +222,45 @@ const CourseManagement = () => {
             }
             
             closeModal();
-            fetchCourses(); 
+            fetchData(); // Refresh list 
         } catch (error) {
             console.error("Operation failed", error);
-            alert("Failed to save course. Course Code must be unique.");
+            alert("Failed to save course. Ensure Course Code is unique.");
         }
     };
 
     const handleDelete = async (id) => {
-        if (window.confirm("Delete this course? This will remove all associated marks.")) {
+        if (window.confirm("Delete this course? This will remove all associated marks and attainment data.")) {
             try {
                 await api.delete(`/courses/${id}/`);
-                fetchCourses();
+                fetchData();
             } catch (error) {
                 console.error("Delete failed", error);
+                alert("Failed to delete course.");
             }
         }
     };
 
     return (
-        <div className="p-6">
+        <div className="p-6 space-y-6">
             <CourseModal 
                 isOpen={isModalOpen} 
                 onClose={closeModal} 
                 onSave={handleSave} 
                 course={selectedCourse} 
+                schemes={schemes}
             />
 
             <Card>
                 <CardHeader>
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                         <div>
                             <CardTitle>Manage Courses</CardTitle>
-                            <CardDescription>Create and manage courses for your department.</CardDescription>
+                            <CardDescription>Create and manage courses for your department. Assign schemes to define calculation logic.</CardDescription>
                         </div>
                         <button 
                             onClick={openAddModal}
-                            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+                            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-bold flex items-center gap-2 transition-colors shadow-sm"
                         >
                             <Icons.PlusCircle className="h-4 w-4" /> Add Course
                         </button>
@@ -223,56 +268,64 @@ const CourseManagement = () => {
                 </CardHeader>
                 <CardContent>
                     {loading ? (
-                        <div className="flex justify-center items-center py-12">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                        <div className="flex justify-center items-center py-12 text-primary-600">
+                            <Loader2 className="h-8 w-8 animate-spin" />
                         </div>
                     ) : (
                         <div className="overflow-x-auto border rounded-lg dark:border-gray-700">
                             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                 <thead className="bg-gray-50 dark:bg-gray-700/50">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Code</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Course Name</th>
-                                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Sem</th>
-                                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Credits</th>
-                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Code</th>
+                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Course Name</th>
+                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Scheme</th>
+                                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Sem</th>
+                                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Credits</th>
+                                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                     {courses.length === 0 ? (
                                         <tr>
-                                            <td colSpan="5" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                                            <td colSpan="6" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
                                                 No courses found. Click "Add Course" to create one.
                                             </td>
                                         </tr>
                                     ) : (
                                         courses.map(c => (
                                             <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-primary-600 dark:text-primary-400 font-medium">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-primary-600 dark:text-primary-400 font-bold">
                                                     {c.code}
                                                 </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">
                                                     {c.name}
                                                 </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500 dark:text-gray-400">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700 dark:text-gray-300">
+                                                    {getSchemeName(c.scheme)}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-gray-500 dark:text-gray-400">
                                                     {c.semester}
                                                 </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500 dark:text-gray-400">
+                                                <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-gray-500 dark:text-gray-400">
                                                     {c.credits}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                    <button 
-                                                        onClick={() => openEditModal(c)}
-                                                        className="text-primary-600 hover:text-primary-900 dark:text-primary-400 dark:hover:text-primary-300 mr-4 font-medium transition-colors"
-                                                    >
-                                                        <Icons.PencilSquare className="w-5 h-5" />
-                                                    </button>
-                                                    <button 
-                                                        onClick={() => handleDelete(c.id)}
-                                                        className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 font-medium transition-colors"
-                                                    >
-                                                        <Icons.Trash className="w-5 h-5" />
-                                                    </button>
+                                                    <div className="flex justify-end gap-3">
+                                                        <button 
+                                                            onClick={() => openEditModal(c)}
+                                                            className="text-primary-600 hover:text-primary-900 dark:text-primary-400 dark:hover:text-primary-300 transition-colors"
+                                                            title="Edit Course"
+                                                        >
+                                                            <Icons.PencilSquare className="w-5 h-5" />
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleDelete(c.id)}
+                                                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 transition-colors"
+                                                            title="Delete Course"
+                                                        >
+                                                            <Icons.Trash className="w-5 h-5" />
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))

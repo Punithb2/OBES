@@ -30,7 +30,6 @@ const CoPoAttainmentPage = () => {
                     api.get('/marks/'),
                     api.get('/pos/'),
                     api.get('/psos/'),
-                    // FIX: Updated URL to 'articulation-matrix' (kebab-case) to match backend
                     api.get('/articulation-matrix/')
                 ]);
 
@@ -47,11 +46,10 @@ const CoPoAttainmentPage = () => {
                 setPos(posRes.data.sort(sortById));
                 setPsos(psosRes.data.sort(sortById));
 
-                // Process Matrix into a Map: { courseId: { coId: { poId: val } } }
+                // Process Matrix
                 const mBuilder = {};
                 const matrixData = Array.isArray(matrixRes.data) ? matrixRes.data : []; 
                 matrixData.forEach(item => {
-                    // Item structure: { course: "C101", matrix: {...} }
                     if (item.course && item.matrix) {
                         mBuilder[item.course] = item.matrix;
                     }
@@ -71,7 +69,6 @@ const CoPoAttainmentPage = () => {
     // --- 2. FILTER & SELECT COURSE ---
     const assignedCourses = useMemo(() => {
         if (!user || !courses.length) return [];
-        // Filter by assigned_faculty ID (ensure string comparison)
         return courses.filter(c => String(c.assigned_faculty) === String(user.id));
     }, [user, courses]);
 
@@ -87,27 +84,38 @@ const CoPoAttainmentPage = () => {
         courses.find(c => c.id === selectedCourseId), 
     [courses, selectedCourseId]);
 
-    // --- 3. BUILD DYNAMIC CONFIG FROM BACKEND DATA ---
+    // --- 3. BUILD DYNAMIC CONFIG FROM SCHEME ---
     const courseConfig = useMemo(() => {
         if (!selectedCourse) return null;
 
-        // Default thresholds
-        const targetLevel = 50; // Pass percentage
-        const attainmentThresholds = [
-             { threshold: 80, level: 3 },
-             { threshold: 70, level: 2 },
-             { threshold: 60, level: 1 },
-             { threshold: 0, level: 0 },
-        ];
+        const settings = selectedCourse.scheme_details?.settings || {};
+        const rules = settings.attainment_rules || {}; 
+
+        // --- A. DYNAMIC THRESHOLD PARSING ---
+        let levelsDict = rules.levelThresholds;
+        if (!levelsDict || Object.keys(levelsDict).length === 0) {
+            levelsDict = { level3: 70, level2: 60, level1: 50 };
+        }
+
+        const sortedLevels = Object.entries(levelsDict)
+            .map(([key, val]) => ({
+                level: parseInt(key.replace(/\D/g, '')) || 0, 
+                threshold: parseFloat(val) || 0
+            }))
+            .sort((a, b) => b.threshold - a.threshold);
+
+        // --- B. OTHER SETTINGS ---
+        const targetLevel = rules.studentPassThreshold !== undefined ? parseFloat(rules.studentPassThreshold) : 50;
+
+        // Weightage Logic - Ensure Valid Defaults
+        const weightage = rules.finalWeightage || { direct: 80, indirect: 20 };
 
         // Process Assessment Tools
         const tools = selectedCourse.assessment_tools || [];
-        
-        // Separate SEE from Internal Assessments
         const seeTool = tools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE' || t.name === 'Semester End Exam');
         const internalTools = tools.filter(t => t !== seeTool && t.type !== 'Improvement Test');
 
-        // Transform Internal Tools into "Parts" structure
+        // Transform Internal Tools
         const assessments = internalTools.map(tool => {
             const parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
                 co: coId,
@@ -115,25 +123,32 @@ const CoPoAttainmentPage = () => {
             }));
             
             return {
-                id: tool.name, // Using name as ID for simplicity
+                id: tool.name, 
                 title: tool.name,
                 total: tool.maxMarks || 0,
                 parts: parts
             };
         });
 
-        // Config for SEE
+        // --- FIX: ROBUST SEE MAPPING LOGIC ---
+        // If coDistribution is missing OR EMPTY keys, use ALL COs from the course.
+        const seeDistributionKeys = seeTool?.coDistribution ? Object.keys(seeTool.coDistribution) : [];
+        const seeCoMap = seeDistributionKeys.length > 0 
+            ? seeDistributionKeys 
+            : (selectedCourse.cos || []).map(c => c.id);
+
         const seeConfig = {
             total: seeTool?.maxMarks || 100,
-            // If SEE has CO distribution, use keys, otherwise assume all COs map roughly
-            coMap: seeTool?.coDistribution ? Object.keys(seeTool.coDistribution) : (selectedCourse.cos || []).map(c => c.id) 
+            coMap: seeCoMap
         };
 
         return {
             targetLevel,
-            attainmentThresholds,
+            sortedLevels,
+            weightage,
             assessments,
-            see: seeConfig
+            see: seeConfig,
+            schemeName: selectedCourse.scheme_details?.name || 'Default Scheme'
         };
     }, [selectedCourse]);
 
@@ -141,15 +156,19 @@ const CoPoAttainmentPage = () => {
     const data = useMemo(() => {
         if (!selectedCourseId || !courseConfig) return null;
 
-        // Filter students for this course
         const students = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
+
+        const getLevel = (percentage) => {
+            if (isNaN(percentage)) return 0;
+            const match = courseConfig.sortedLevels.find(l => percentage >= l.threshold);
+            return match ? match.level : 0;
+        };
 
         return students.map(student => {
             const row = { student, assessments: {} };
 
             // Process Internal Assessments
             courseConfig.assessments.forEach(assessment => {
-                // Find marks record for this student + assessment
                 const markRecord = allMarks.find(m => 
                     m.student === student.id && 
                     m.course === selectedCourseId && 
@@ -163,16 +182,15 @@ const CoPoAttainmentPage = () => {
                     const obtained = parseFloat(scores[part.co] || 0);
                     currentTotal += obtained;
 
-                    // Calculate Attainment Level (0 or 3 based on Target Met)
-                    const targetScore = (part.max * courseConfig.targetLevel) / 100;
-                    const targetMet = obtained >= targetScore;
+                    const percentage = part.max > 0 ? (obtained / part.max) * 100 : 0;
+                    const level = getLevel(percentage);
                     
                     return {
                         co: part.co,
                         max: part.max,
                         obtained: obtained,
-                        targetMet: targetMet,
-                        score: targetMet ? 3 : 0 // Contribution to attainment
+                        targetMet: percentage >= courseConfig.targetLevel,
+                        score: level         
                     };
                 });
 
@@ -191,28 +209,27 @@ const CoPoAttainmentPage = () => {
             
             let seeObtained = 0;
             if (seeRecord && seeRecord.scores) {
-                 // Sum all values in scores or look for 'External'
                  seeObtained = Object.values(seeRecord.scores).reduce((a, b) => a + (parseFloat(b)||0), 0);
             }
             
-            const seeTarget = (courseConfig.see.total * courseConfig.targetLevel) / 100;
+            const seePercent = courseConfig.see.total > 0 ? (seeObtained / courseConfig.see.total) * 100 : 0;
+            
             row.see = {
                 obtained: seeObtained,
-                targetMet: seeObtained >= seeTarget,
-                score: seeObtained >= seeTarget ? 3 : 0
+                targetMet: seePercent >= courseConfig.targetLevel,
+                score: getLevel(seePercent)
             };
 
             return row;
         });
     }, [selectedCourseId, allStudents, allMarks, courseConfig]);
 
-    // --- 5. SUMMARIZE DATA (Column Counts) ---
+    // --- 5. SUMMARIZE DATA ---
     const summary = useMemo(() => {
         if (!data || !courseConfig) return null;
 
         const s = { assessments: {}, see: { yCount: 0 } };
 
-        // Initialize counters
         courseConfig.assessments.forEach(assessment => {
             s.assessments[assessment.id] = { parts: [] };
             assessment.parts.forEach((_, idx) => {
@@ -220,7 +237,6 @@ const CoPoAttainmentPage = () => {
             });
         });
 
-        // Aggregate
         data.forEach(row => {
             courseConfig.assessments.forEach(assessment => {
                 row.assessments[assessment.id].parts.forEach((p, idx) => {
@@ -237,87 +253,91 @@ const CoPoAttainmentPage = () => {
     const finalAttainmentData = useMemo(() => {
         if (!data || !summary || !courseConfig || !selectedCourse) return null;
 
-        const totalStudents = data.length || 1; // Prevent div by zero
         const coStats = {};
         
-        // Collect all unique COs
         const allCos = new Set();
         courseConfig.assessments.forEach(a => a.parts.forEach(p => allCos.add(p.co)));
-        // Add COs from course definition to ensure we cover everything even if not assessed internally
         (selectedCourse.cos || []).forEach(c => allCos.add(c.id));
 
-        // Initialize
-        const seePercent = (summary.see.yCount / totalStudents) * 100;
-        // Calculate SEE Level using thresholds
-        const seeLevel = courseConfig.attainmentThresholds.find(t => seePercent >= t.threshold)?.level || 0;
-
         allCos.forEach(co => {
-            coStats[co] = { 
-                ciePercents: [],
-                seeLevel: seeLevel // Simplified: SEE applies to all mapped COs equally in this model
-            };
+            coStats[co] = { cieLevels: [], seeLevels: [] };
         });
 
-        // Aggregate CIE Percentages per CO
-        courseConfig.assessments.forEach(assessment => {
-            assessment.parts.forEach((part, idx) => {
-                const stats = summary.assessments[assessment.id].parts[idx];
-                const percent = (stats.yCount / totalStudents) * 100;
-                if (coStats[part.co]) {
-                    coStats[part.co].ciePercents.push(percent);
+        data.forEach(row => {
+            // Collect SEE Level
+            if (row.see) {
+                 // Map SEE score to ALL COs in the map (which now defaults to ALL if empty)
+                 courseConfig.see.coMap.forEach(coId => {
+                     if (coStats[coId]) coStats[coId].seeLevels.push(row.see.score);
+                 });
+            }
+
+            // Collect CIE Levels
+            courseConfig.assessments.forEach(assessment => {
+                const studentAssessment = row.assessments[assessment.id];
+                if (studentAssessment && studentAssessment.parts) {
+                    studentAssessment.parts.forEach(studentPart => {
+                        if (coStats[studentPart.co]) {
+                            coStats[studentPart.co].cieLevels.push(studentPart.score);
+                        }
+                    });
                 }
             });
         });
 
-        // Get Indirect Attainment from Course Settings
         const indirectMap = selectedCourse.settings?.indirect_attainment || {};
+        
+        const wDirect = parseFloat(courseConfig.weightage?.direct) || 80;
+        const wIndirect = parseFloat(courseConfig.weightage?.indirect) || 20;
 
-        // Build Rows
         const rows = Array.from(allCos).sort().map(co => {
             const stats = coStats[co];
             
-            // Average CIE Percentage
-            const cieAvgPercent = stats.ciePercents.length 
-                ? stats.ciePercents.reduce((a, b) => a + b, 0) / stats.ciePercents.length 
+            // Average of Student Levels for CIE
+            const cieAvg = stats.cieLevels.length 
+                ? stats.cieLevels.reduce((a, b) => a + b, 0) / stats.cieLevels.length 
                 : 0;
 
-            // Determine CIE Level
-            const cieLevel = courseConfig.attainmentThresholds.find(t => cieAvgPercent >= t.threshold)?.level || 0;
+            // Average of Student Levels for SEE
+            const seeAvg = stats.seeLevels.length 
+                ? stats.seeLevels.reduce((a, b) => a + b, 0) / stats.seeLevels.length 
+                : 0;
 
-            // Direct Attainment
-            const directAttainment = (cieLevel + stats.seeLevel) / 2;
+            const directAttainment = (cieAvg + seeAvg) / 2;
+            
+            let indirectVal = 3;
+            if (indirectMap[co] !== undefined) {
+                const parsed = parseFloat(indirectMap[co]);
+                if (!isNaN(parsed)) indirectVal = parsed;
+            }
 
-            // Indirect Attainment
-            const indirectAttainment = parseFloat(indirectMap[co] || 3); 
-
-            // Final Score Index (80% Direct + 20% Indirect)
-            const scoreIndex = (0.8 * directAttainment) + (0.2 * indirectAttainment);
+            const scoreIndex = ((wDirect / 100) * directAttainment) + ((wIndirect / 100) * indirectVal);
 
             return {
                 co,
-                ciePercent: cieAvgPercent,
-                cieLevel,
-                seeLevel: stats.seeLevel,
+                cieLevel: cieAvg, 
+                seeLevel: seeAvg, 
                 direct: directAttainment,
-                indirect: indirectAttainment,
+                indirect: indirectVal,
                 scoreIndex
             };
         });
 
+        const rowCount = rows.length || 1; 
+
         const avgRow = {
             co: 'AVERAGE',
-            ciePercent: rows.reduce((s, r) => s + r.ciePercent, 0) / rows.length,
-            cieLevel: rows.reduce((s, r) => s + r.cieLevel, 0) / rows.length,
-            seeLevel: rows.reduce((s, r) => s + r.seeLevel, 0) / rows.length,
-            direct: rows.reduce((s, r) => s + r.direct, 0) / rows.length,
-            indirect: rows.reduce((s, r) => s + r.indirect, 0) / rows.length,
-            scoreIndex: rows.reduce((s, r) => s + r.scoreIndex, 0) / rows.length,
+            cieLevel: rows.length ? rows.reduce((s, r) => s + r.cieLevel, 0) / rowCount : 0,
+            seeLevel: rows.length ? rows.reduce((s, r) => s + r.seeLevel, 0) / rowCount : 0,
+            direct: rows.length ? rows.reduce((s, r) => s + r.direct, 0) / rowCount : 0,
+            indirect: rows.length ? rows.reduce((s, r) => s + r.indirect, 0) / rowCount : 0,
+            scoreIndex: rows.length ? rows.reduce((s, r) => s + r.scoreIndex, 0) / rowCount : 0,
         };
 
         return { rows, avgRow };
     }, [data, summary, courseConfig, selectedCourse]);
 
-    // --- 7. PO ATTAINMENT CALCULATION ---
+    // --- 7. PO ATTAINMENT ---
     const poAttainmentData = useMemo(() => {
         if (!finalAttainmentData || !selectedCourse || !matrixMap[selectedCourseId]) return null;
         
@@ -325,26 +345,21 @@ const CoPoAttainmentPage = () => {
         const courseMatrix = matrixMap[selectedCourseId]; 
         const outcomes = [...pos, ...psos]; 
 
-        // 1. EXPECTED (Mapping Average)
         const expectedRows = coRows.map(row => {
             const outcomeValues = {};
             outcomes.forEach(outcome => {
                 let val = courseMatrix[row.co]?.[outcome.id];
-                
-                // Fallback for ID mismatch (e.g. CO1 vs C101.1)
                 if (val === undefined) {
                      const coIndex = parseInt(row.co.replace(/\D/g, '')) - 1;
                      if (selectedCourse.cos && selectedCourse.cos[coIndex]) {
                          val = courseMatrix[selectedCourse.cos[coIndex].id]?.[outcome.id];
                      }
                 }
-
                 outcomeValues[outcome.id] = val !== undefined && val !== "" ? parseFloat(val) : '-';
             });
             return { co: row.co, values: outcomeValues };
         });
 
-        // Average Expected
         const expectedAvg = {};
         outcomes.forEach(outcome => {
             let sum = 0, count = 0;
@@ -357,15 +372,12 @@ const CoPoAttainmentPage = () => {
             expectedAvg[outcome.id] = count > 0 ? (sum / count).toFixed(2) : '-';
         });
 
-        // 2. ACTUAL (Calculated)
         const actualRows = expectedRows.map((row, idx) => {
              const coLevel = coRows[idx].scoreIndex; 
              const actualValues = {};
-             
              outcomes.forEach(outcome => {
                  const mapping = row.values[outcome.id];
                  if (mapping !== '-') {
-                     // Formula: (MappingLevel * CO_Attainment) / 3
                      const val = (mapping * coLevel) / 3;
                      actualValues[outcome.id] = parseFloat(val.toFixed(2));
                  } else {
@@ -417,7 +429,7 @@ const CoPoAttainmentPage = () => {
                             <React.Fragment key={`head-${assessment.id}-${idx}`}>
                                 <th className="bg-green-100 dark:bg-green-900/30 border-r border-gray-300 px-1">{part.co}({part.max})</th>
                                 <th className="bg-white dark:bg-gray-700 border-r border-gray-300 px-1">Lvl</th>
-                                <th className="bg-yellow-200 dark:bg-yellow-700 border-r border-gray-300 px-1">{'>'}50%</th>
+                                <th className="bg-yellow-200 dark:bg-yellow-700 border-r border-gray-300 px-1">{'>'}{courseConfig.targetLevel}%</th>
                             </React.Fragment>
                         ))}
                         <th className="bg-blue-100 dark:bg-blue-900 border-r border-gray-300 px-1">Tot</th>
@@ -432,11 +444,10 @@ const CoPoAttainmentPage = () => {
 
     const renderTableFooter = () => {
         if (!data || !summary) return null;
-        const totalStudents = data.length || 1;
+        
         const labels = [
             { key: 'yCount', title: "Number of 'Y's" },
-            { key: 'percentage', title: "% Above Target" },
-            { key: 'level', title: "Attainment Level" }
+            { key: 'percentage', title: "% Above Pass" },
         ];
 
         return (
@@ -450,14 +461,11 @@ const CoPoAttainmentPage = () => {
                             <React.Fragment key={assessment.id}>
                                 {assessment.parts.map((part, pIdx) => {
                                     const stats = summary.assessments[assessment.id].parts[pIdx];
-                                    const percent = (stats.yCount / totalStudents) * 100;
-                                    const level = courseConfig.attainmentThresholds.find(t => percent >= t.threshold)?.level || 0;
-                                    
+                                    const totalStudents = data.length || 1;
                                     let val = '';
                                     if (labelRow.key === 'yCount') val = stats.yCount;
-                                    if (labelRow.key === 'percentage') val = percent.toFixed(1) + '%';
-                                    if (labelRow.key === 'level') val = level;
-
+                                    if (labelRow.key === 'percentage') val = ((stats.yCount / totalStudents) * 100).toFixed(1) + '%';
+                                    
                                     return (
                                         <React.Fragment key={`foot-${assessment.id}-${pIdx}`}>
                                             <td></td><td></td>
@@ -471,8 +479,7 @@ const CoPoAttainmentPage = () => {
                          <td></td><td></td>
                          <td className="bg-[#8B5A2B] text-white">
                             {labelRow.key === 'yCount' && summary.see.yCount}
-                            {labelRow.key === 'percentage' && ((summary.see.yCount/totalStudents)*100).toFixed(1)+'%'}
-                            {labelRow.key === 'level' && (courseConfig.attainmentThresholds.find(t => ((summary.see.yCount/totalStudents)*100) >= t.threshold)?.level || 0)}
+                            {labelRow.key === 'percentage' && ((summary.see.yCount / (data.length || 1))*100).toFixed(1)+'%'}
                          </td>
                     </tr>
                 ))}
@@ -486,9 +493,24 @@ const CoPoAttainmentPage = () => {
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">CO-PO Attainment</h1>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1">
-                        Consolidated attainment report based on Internal Assessments, SEE, and Indirect Feedback.
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                        <p className="text-gray-500 dark:text-gray-400">
+                            Scheme: <span className="font-bold text-primary-600 dark:text-primary-400">{courseConfig?.schemeName || 'Loading...'}</span>
+                        </p>
+                        {courseConfig && (
+                            <div className="flex flex-wrap gap-2 text-xs">
+                                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded border dark:bg-gray-700 dark:text-gray-300">
+                                    Pass: {courseConfig.targetLevel}%
+                                </span>
+                                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded border dark:bg-gray-700 dark:text-gray-300">
+                                    Levels: {courseConfig.sortedLevels.map(l => `L${l.level}>${l.threshold}%`).join(', ')}
+                                </span>
+                                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded border dark:bg-gray-700 dark:text-gray-300">
+                                    Weights: {courseConfig.weightage.direct}% Direct / {courseConfig.weightage.indirect}% Indirect
+                                </span>
+                            </div>
+                        )}
+                    </div>
                 </div>
                 <select
                     value={selectedCourseId}
@@ -565,9 +587,8 @@ const CoPoAttainmentPage = () => {
                                     <thead className="bg-gray-100 dark:bg-gray-700 font-bold">
                                             <tr>
                                                 <th className="px-4 py-2 border-r">CO</th>
-                                                <th className="px-4 py-2 border-r">CIE %</th>
-                                                <th className="px-4 py-2 border-r">CIE Level</th>
-                                                <th className="px-4 py-2 border-r">SEE Level</th>
+                                                <th className="px-4 py-2 border-r">CIE Avg Level</th>
+                                                <th className="px-4 py-2 border-r">SEE Avg Level</th>
                                                 <th className="px-4 py-2 border-r">Direct Attainment</th>
                                                 <th className="px-4 py-2 border-r">Indirect Attainment</th>
                                                 <th className="px-4 py-2 bg-green-100 dark:bg-green-900/30">Final Score Index</th>
@@ -577,9 +598,8 @@ const CoPoAttainmentPage = () => {
                                         {finalAttainmentData.rows.map(row => (
                                             <tr key={row.co}>
                                                 <td className="px-4 py-2 border-r font-bold">{row.co}</td>
-                                                <td className="px-4 py-2 border-r">{row.ciePercent.toFixed(1)}%</td>
-                                                <td className="px-4 py-2 border-r">{row.cieLevel}</td>
-                                                <td className="px-4 py-2 border-r">{row.seeLevel}</td>
+                                                <td className="px-4 py-2 border-r">{row.cieLevel.toFixed(2)}</td>
+                                                <td className="px-4 py-2 border-r">{row.seeLevel.toFixed(2)}</td>
                                                 <td className="px-4 py-2 border-r">{row.direct.toFixed(2)}</td>
                                                 <td className="px-4 py-2 border-r">{row.indirect.toFixed(2)}</td>
                                                 <td className="px-4 py-2 font-bold">{row.scoreIndex.toFixed(2)}</td>
@@ -589,7 +609,6 @@ const CoPoAttainmentPage = () => {
                                      <tfoot className="bg-orange-100 dark:bg-orange-900/30 font-bold">
                                         <tr>
                                             <td className="px-4 py-2 border-r">AVERAGE</td>
-                                            <td className="px-4 py-2 border-r">{finalAttainmentData.avgRow.ciePercent.toFixed(1)}%</td>
                                             <td className="px-4 py-2 border-r">{finalAttainmentData.avgRow.cieLevel.toFixed(2)}</td>
                                             <td className="px-4 py-2 border-r">{finalAttainmentData.avgRow.seeLevel.toFixed(2)}</td>
                                             <td className="px-4 py-2 border-r">{finalAttainmentData.avgRow.direct.toFixed(2)}</td>

@@ -2,8 +2,8 @@ from rest_framework import viewsets, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.views import APIView
-from .models import ArticulationMatrix, Configuration, ProgramOutcome, ProgramSpecificOutcome, User, Department, Course, Student, Mark, Survey
-from .serializers import ArticulationMatrixSerializer, ConfigurationSerializer, ProgramOutcomeSerializer, ProgramSpecificOutcomeSerializer, UserSerializer, DepartmentSerializer, CourseSerializer, StudentSerializer, MarkSerializer, SurveySerializer
+from .models import *
+from .serializers import *
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
@@ -54,7 +54,11 @@ class UserViewSet(viewsets.ModelViewSet):
         # Endpoint to get current logged-in user details
         serializer = self.get_serializer(request.user)
         return Response(serializer.data)
-    
+
+class SchemeViewSet(viewsets.ModelViewSet):
+    queryset = Scheme.objects.all()
+    serializer_class = SchemeSerializer
+
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer

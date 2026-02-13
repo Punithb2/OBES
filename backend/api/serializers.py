@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Department, Course, Student, Mark, ArticulationMatrix, Configuration, ProgramOutcome, ProgramSpecificOutcome, Survey
+from .models import User, Department, Course, Student, Mark, ArticulationMatrix, Configuration, ProgramOutcome, ProgramSpecificOutcome, Survey, Scheme
 
 class DepartmentSerializer(serializers.ModelSerializer):
     class Meta:
@@ -20,11 +20,17 @@ class UserSerializer(serializers.ModelSerializer):
             user.set_password(password)
             user.save()
         return user
-    
+
+class SchemeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Scheme
+        fields = '__all__'
+
 class CourseSerializer(serializers.ModelSerializer):
     # Optional: nested serializer to show faculty name instead of just ID
     assigned_faculty_name = serializers.ReadOnlyField(source='assigned_faculty.display_name')
-
+    scheme_details = SchemeSerializer(source='scheme', read_only=True)
+    
     class Meta:
         model = Course
         fields = '__all__'

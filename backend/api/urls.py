@@ -14,6 +14,7 @@ router.register(r'psos', ProgramSpecificOutcomeViewSet)
 router.register(r'configurations', ConfigurationViewSet)
 router.register(r'articulation-matrix', ArticulationMatrixViewSet)
 router.register(r'surveys', SurveyViewSet)
+router.register(r'schemes', SchemeViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),

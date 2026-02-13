@@ -43,6 +43,27 @@ class User(AbstractUser):
             self.display_name = f"{self.first_name} {self.last_name}".strip()
         super().save(*args, **kwargs)
 
+class Scheme(models.Model):
+    """
+    Defines the rules for a specific academic scheme (e.g., 2018 Scheme, 2022 Scheme).
+    Stores thresholds, weightages, and calculation logic parameters.
+    """
+    id = models.CharField(max_length=20, primary_key=True) # e.g., "SCHEME2022"
+    name = models.CharField(max_length=100) # e.g., "2022 Outcome Based Education Scheme"
+    
+    # Stores all calculation logic in a flexible JSON format
+    # Structure example:
+    # {
+    #   "pass_criteria": 50,
+    #   "levels": { "3": 70, "2": 60, "1": 50 },
+    #   "internal_split": { "cie": 50, "see": 50 },
+    #   "po_weightage": { "direct": 80, "indirect": 20 }
+    # }
+    settings = models.JSONField(default=dict)
+
+    def __str__(self):
+        return self.name
+
 class Course(models.Model):
     id = models.CharField(max_length=20, primary_key=True) # e.g., C101
     code = models.CharField(max_length=20) # e.g., CS101
@@ -51,8 +72,7 @@ class Course(models.Model):
     credits = models.IntegerField()
     department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="courses")
     assigned_faculty = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="courses")
-    
-    # Storing complex JSON data (COs, Assessment Tools) directly
+    scheme = models.ForeignKey(Scheme, on_delete=models.SET_NULL, null=True, blank=True, related_name="courses")
     cos = models.JSONField(default=list, blank=True) 
     assessment_tools = models.JSONField(default=list, blank=True)
     settings = models.JSONField(default=dict, blank=True)

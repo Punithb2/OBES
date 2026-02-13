@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '../shared/Card';
 import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Filter } from 'lucide-react';
 
 const EvaluationResultPage = () => {
     const { user } = useAuth();
@@ -10,12 +10,15 @@ const EvaluationResultPage = () => {
     
     // Data States
     const [courses, setCourses] = useState([]);
+    const [schemes, setSchemes] = useState([]);
     const [outcomes, setOutcomes] = useState([]);
     const [allStudents, setAllStudents] = useState([]);
     const [allMarks, setAllMarks] = useState([]);
     const [matrix, setMatrix] = useState({});
     const [surveyData, setSurveyData] = useState({ exit_survey: {}, employer_survey: {}, alumni_survey: {} });
-    const [config, setConfig] = useState(null);
+    
+    // UI State
+    const [selectedSchemeId, setSelectedSchemeId] = useState('');
 
     // --- 1. FETCH ALL DATA ---
     useEffect(() => {
@@ -26,15 +29,14 @@ const EvaluationResultPage = () => {
                 setLoading(true);
                 const deptId = user.department;
 
-                const [coursesRes, studentsRes, marksRes, posRes, psosRes, matrixRes, configRes, surveyRes] = await Promise.all([
+                const [coursesRes, schemesRes, studentsRes, marksRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
                     api.get(`/courses/?departmentId=${deptId}`),
+                    api.get('/schemes/'), // Fetch all schemes
                     api.get('/students/'),
                     api.get('/marks/'),
                     api.get('/pos/'),
                     api.get('/psos/'),
                     api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: [] })),
-                    api.get('/configurations/global/').catch(() => ({ data: null })),
-                    // FIX: Use the correct filter endpoint
                     api.get(`/surveys/?department=${deptId}`).catch(() => ({ data: [] })) 
                 ]);
 
@@ -46,12 +48,17 @@ const EvaluationResultPage = () => {
                 };
 
                 setCourses(coursesRes.data);
+                setSchemes(schemesRes.data);
+                
+                // Default to the first available scheme for summary calculation
+                if (schemesRes.data.length > 0) {
+                    setSelectedSchemeId(schemesRes.data[0].id);
+                }
+
                 setAllStudents(studentsRes.data);
                 setAllMarks(marksRes.data);
                 setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
-                setConfig(configRes.data);
 
-                // FIX: Extract the first survey record if it exists
                 if (surveyRes.data && surveyRes.data.length > 0) {
                     setSurveyData(surveyRes.data[0]);
                 }
@@ -86,12 +93,29 @@ const EvaluationResultPage = () => {
 
             if (courseStudents.length === 0 || courseMarks.length === 0) return {};
 
-            const tools = course.assessment_tools || course.assessmentTools || [];
+            // --- DYNAMIC: Get Rules from Course's Scheme ---
+            const settings = course.scheme_details?.settings || {};
+            const rules = settings.attainment_rules || {};
+            
+            // 1. Thresholds
+            const targetLevel = rules.studentPassThreshold || 50; // Default 50%
+            const lThresholds = rules.levelThresholds || { level3: 70, level2: 60, level1: 50 };
+            const thresholds = [
+                { threshold: lThresholds.level3, level: 3 },
+                { threshold: lThresholds.level2, level: 2 },
+                { threshold: lThresholds.level1, level: 1 },
+                { threshold: 0, level: 0 }
+            ];
+
+            // 2. Weightage (Direct vs Indirect for Course)
+            const wDirect = (rules.finalWeightage?.direct || 80) / 100;
+            const wIndirect = (rules.finalWeightage?.indirect || 20) / 100;
+
+            const tools = course.assessment_tools || [];
             const seeTool = tools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE' || t.name === 'Semester End Exam');
             const internalTools = tools.filter(t => t !== seeTool && t.type !== 'Improvement Test');
-            const thresholds = [{ threshold: 80, level: 3 }, { threshold: 70, level: 2 }, { threshold: 60, level: 1 }, { threshold: 0, level: 0 }];
-            const targetLevel = 50;
-
+            
+            // A. Calculate SEE Level
             let seePassedCount = 0;
             if (seeTool) {
                 courseStudents.forEach(student => {
@@ -105,6 +129,7 @@ const EvaluationResultPage = () => {
             const seePercent = (seePassedCount / (courseStudents.length || 1)) * 100;
             const seeLevel = thresholds.find(t => seePercent >= t.threshold)?.level || 0;
 
+            // B. Calculate CO Levels
             const coLevels = {};
             (course.cos || []).forEach(co => {
                 let coTotal = 0, coPassed = 0;
@@ -120,11 +145,15 @@ const EvaluationResultPage = () => {
                 });
                 const cieLevel = thresholds.find(t => ((coTotal > 0 ? (coPassed/coTotal)*100 : 0) >= t.threshold))?.level || 0;
                 
-                const indirect = parseFloat(course.settings?.indirect_attainment?.[co.id] || 3);
-                const direct = (cieLevel + seeLevel) / 2;
-                coLevels[co.id] = (0.8 * direct) + (0.2 * indirect);
+                // Course Internal Attainment Split
+                const indirectVal = parseFloat(course.settings?.indirect_attainment?.[co.id] || 3);
+                const directVal = (cieLevel + seeLevel) / 2;
+                
+                // DYNAMIC SPLIT APPLIED HERE
+                coLevels[co.id] = (wDirect * directVal) + (wIndirect * indirectVal);
             });
 
+            // C. Map to POs
             const poAttainment = {};
             outcomes.forEach(outcome => {
                 let wSum = 0, wCount = 0;
@@ -158,7 +187,7 @@ const EvaluationResultPage = () => {
             if (count > 0) directAttainment[outcome.id] = sum / count;
         });
 
-        // --- C. Extract Survey Data (Use snake_case keys from Django) ---
+        // --- C. Extract Survey Data ---
         const exitData = surveyData.exit_survey || {};
         const employerData = surveyData.employer_survey || {};
         const alumniData = surveyData.alumni_survey || {};
@@ -175,8 +204,11 @@ const EvaluationResultPage = () => {
             indirectAttainment[outcome.id] = divisor > 0 ? total / divisor : 0;
         });
 
-        const wDirect = (config?.attainmentRules?.finalWeightage?.direct || 80) / 100;
-        const wIndirect = (config?.attainmentRules?.finalWeightage?.indirect || 20) / 100;
+        // --- D. Final Program Weightage (Based on Selected Reference Scheme) ---
+        const refScheme = schemes.find(s => s.id === selectedSchemeId);
+        const refRules = refScheme?.settings?.attainment_rules || {};
+        const wDirectProgram = (refRules.finalWeightage?.direct || 80) / 100;
+        const wIndirectProgram = (refRules.finalWeightage?.indirect || 20) / 100;
 
         const rowC = {}; 
         const rowD = {};
@@ -187,8 +219,8 @@ const EvaluationResultPage = () => {
             const dir = directAttainment[id] || 0;
             const ind = indirectAttainment[id] || 0;
             
-            rowC[id] = dir * wDirect;
-            rowD[id] = ind * wIndirect;
+            rowC[id] = dir * wDirectProgram;
+            rowD[id] = ind * wIndirectProgram;
             totalRow[id] = rowC[id] + rowD[id];
         });
 
@@ -198,24 +230,47 @@ const EvaluationResultPage = () => {
             { label: 'Employer Survey', data: employerData },
             { label: 'Alumni Survey', data: alumniData },
             { label: 'Indirect Attainment (Avg of Surveys) [B]', data: indirectAttainment, bold: true, bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
-            { label: `80% of Direct [C = A * ${wDirect}]`, data: rowC },
-            { label: `20% of Indirect [D = B * ${wIndirect}]`, data: rowD },
+            { 
+                label: `weighted Direct [C = A * ${(wDirectProgram * 100).toFixed(0)}%]`, 
+                data: rowC 
+            },
+            { 
+                label: `weighted Indirect [D = B * ${(wIndirectProgram * 100).toFixed(0)}%]`, 
+                data: rowD 
+            },
             { label: 'Total Attainment [C + D]', data: totalRow, bold: true, bg: 'bg-green-50 dark:bg-green-900/20' },
         ];
 
         return { courseRows, summaryRows };
 
-    }, [courses, outcomes, allStudents, allMarks, matrix, surveyData, config]);
+    }, [courses, outcomes, allStudents, allMarks, matrix, surveyData, schemes, selectedSchemeId]);
 
 
     if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
 
     return (
         <div className="space-y-6 p-6">
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Result of Evaluation</h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-1">
-                Final Program Attainment calculated from Course Performance (Direct) and Stakeholder Surveys (Indirect).
-            </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Result of Evaluation</h1>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1">
+                        Final Program Attainment calculated from Course Performance and Stakeholder Surveys.
+                    </p>
+                </div>
+                
+                {/* Reference Scheme Selector */}
+                <div className="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg border shadow-sm">
+                    <Filter className="w-4 h-4 text-gray-500" />
+                    <span className="text-xs font-bold text-gray-500 uppercase">Summary Logic:</span>
+                    <select 
+                        value={selectedSchemeId}
+                        onChange={(e) => setSelectedSchemeId(e.target.value)}
+                        className="text-sm font-bold border-none focus:ring-0 cursor-pointer bg-transparent text-primary-700 dark:text-primary-400"
+                    >
+                        {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                </div>
+            </div>
 
             <Card>
                 <CardContent className="pt-6">
@@ -238,8 +293,13 @@ const EvaluationResultPage = () => {
                                 {/* COURSE ROWS */}
                                 {calculateData.courseRows.map(({ course, attainment }) => (
                                     <tr key={course.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                                        <td className="px-4 py-2 whitespace-nowrap text-sm font-semibold text-gray-700 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600">
-                                            {course.code}
+                                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600">
+                                            <div className="flex flex-col">
+                                                <span className="font-bold">{course.code}</span>
+                                                <span className="text-[10px] text-gray-400">
+                                                    {course.scheme_details?.name ? course.scheme_details.name.substring(0,15)+'...' : 'Default'}
+                                                </span>
+                                            </div>
                                         </td>
                                         {outcomes.map(outcome => (
                                             <td key={outcome.id} className="px-3 py-2 whitespace-nowrap text-center text-sm border-r border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400">
