@@ -1,65 +1,91 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
 import api from '../../../services/api';
+import { Loader2, Filter, Building2, Search } from 'lucide-react';
 
 const DepartmentAttainmentPage = () => {
-    const [departments, setDepartments] = useState([]);
-    const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+    const [loading, setLoading] = useState(false);
     
+    // UI State
+    const [departments, setDepartments] = useState([]);
+    const [selectedDeptId, setSelectedDeptId] = useState('');
+    const [selectedSchemeId, setSelectedSchemeId] = useState('');
+
     // Data States
     const [courses, setCourses] = useState([]);
+    const [schemes, setSchemes] = useState([]);
     const [outcomes, setOutcomes] = useState([]);
+    const [allStudents, setAllStudents] = useState([]);
+    const [allMarks, setAllMarks] = useState([]);
     const [matrix, setMatrix] = useState({});
-    const [surveyData, setSurveyData] = useState({ exitSurvey: {}, employerSurvey: {}, alumniSurvey: {} });
-    const [config, setConfig] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [surveyData, setSurveyData] = useState({ exit_survey: {}, employer_survey: {}, alumni_survey: {} });
 
-    // 1. Fetch Initial Data
+    // --- 1. INITIAL LOAD (Departments & Schemes) ---
     useEffect(() => {
-        const fetchGlobals = async () => {
+        const fetchInitData = async () => {
             try {
-                // FIXED: Trailing slashes added to all calls
-                const [deptRes, posRes, psosRes, matrixRes, configRes] = await Promise.all([
+                const [deptRes, schemesRes] = await Promise.all([
                     api.get('/departments/'),
-                    api.get('/pos/').catch(() => ({ data: [] })), // Graceful fallback
-                    api.get('/psos/').catch(() => ({ data: [] })),
-                    api.get('/articulationMatrix/').catch(() => ({ data: {} })),
-                    api.get('/configurations/global/').catch(() => ({ data: {} }))
+                    api.get('/schemes/')
                 ]);
-
                 setDepartments(deptRes.data);
-                setOutcomes([...posRes.data, ...psosRes.data]);
-                setMatrix(matrixRes.data);
-                setConfig(configRes.data);
+                setSchemes(schemesRes.data);
                 
-                if (deptRes.data.length > 0) {
-                    setSelectedDepartmentId(deptRes.data[0].id);
+                // Default to first scheme for summary logic
+                if (schemesRes.data.length > 0) {
+                    setSelectedSchemeId(schemesRes.data[0].id);
                 }
             } catch (error) {
-                console.error("Failed to load global data", error);
+                console.error("Failed to load initial data", error);
             }
         };
-        fetchGlobals();
+        fetchInitData();
     }, []);
 
-    // 2. Fetch Department Specific Data
+    // --- 2. FETCH DEPARTMENT DATA (On Selection) ---
     useEffect(() => {
+        if (!selectedDeptId) return;
+
         const fetchDeptData = async () => {
-            if (!selectedDepartmentId) return;
-            
             setLoading(true);
             try {
-                // FIXED: Slash before query param
-                const coursesRes = await api.get(`/courses/?departmentId=${selectedDepartmentId}`);
-                setCourses(coursesRes.data);
+                const [coursesRes, studentsRes, marksRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
+                    api.get(`/courses/?departmentId=${selectedDeptId}`),
+                    api.get('/students/'), // Ideally filter by dept on backend
+                    api.get('/marks/'),    // Ideally filter by dept on backend
+                    api.get('/pos/'),
+                    api.get('/psos/'),
+                    api.get(`/articulation-matrix/?department=${selectedDeptId}`).catch(() => ({ data: [] })),
+                    api.get(`/surveys/?department=${selectedDeptId}`).catch(() => ({ data: [] }))
+                ]);
 
-                try {
-                    // FIXED: Trailing slash
-                    const surveyRes = await api.get(`/surveys/${selectedDepartmentId}/`);
-                    setSurveyData(surveyRes.data);
-                } catch (err) {
-                    setSurveyData({ exitSurvey: {}, employerSurvey: {}, alumniSurvey: {} });
+                // Sort Outcomes
+                const sortById = (a, b) => {
+                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
+                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    return numA - numB;
+                };
+
+                setCourses(coursesRes.data);
+                setAllStudents(studentsRes.data);
+                setAllMarks(marksRes.data);
+                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
+
+                if (surveyRes.data && surveyRes.data.length > 0) {
+                    setSurveyData(surveyRes.data[0]);
+                } else {
+                    setSurveyData({ exit_survey: {}, employer_survey: {}, alumni_survey: {} });
                 }
+
+                // Process Matrix
+                const mBuilder = {};
+                const matrixData = Array.isArray(matrixRes.data) ? matrixRes.data : [];
+                matrixData.forEach(item => {
+                    if (item.course && item.matrix) {
+                        mBuilder[item.course] = item.matrix;
+                    }
+                });
+                setMatrix(mBuilder);
 
             } catch (error) {
                 console.error("Failed to load department data", error);
@@ -69,53 +95,116 @@ const DepartmentAttainmentPage = () => {
         };
 
         fetchDeptData();
-    }, [selectedDepartmentId]);
+    }, [selectedDeptId]);
 
-    // 3. Calculation Logic (Memoized)
-    const attainmentData = useMemo(() => {
-        if (!courses.length || !outcomes.length) return null;
+    // --- 3. CALCULATION ENGINE (Identical to Admin Page) ---
+    const calculateData = useMemo(() => {
+        if (!selectedDeptId || !courses.length || !outcomes.length) return { courseRows: [], summaryRows: [] };
 
-        const calculateCourseAverage = (course) => {
-            const courseMatrix = matrix[course.id];
-            if (!courseMatrix) return {}; 
+        const getCourseAttainment = (course) => {
+            const courseStudents = allStudents.filter(s => s.courses && s.courses.includes(course.id));
+            const courseMarks = allMarks.filter(m => m.course === course.id);
+            const courseMatrix = matrix[course.id] || {};
 
-            const averages = {};
-            outcomes.forEach(outcome => {
-                let sum = 0;
-                let count = 0;
-                Object.values(courseMatrix).forEach(coMap => {
-                    const val = coMap[outcome.id];
-                    if (val && val > 0) {
-                        sum += val;
-                        count++;
+            if (courseStudents.length === 0 || courseMarks.length === 0) return {};
+
+            // --- DYNAMIC RULES FROM COURSE SCHEME ---
+            const settings = course.scheme_details?.settings || {};
+            const rules = settings.attainment_rules || {};
+            
+            // 1. Thresholds
+            const lThresholds = rules.levelThresholds || { level3: 70, level2: 60, level1: 50 };
+            const thresholds = [
+                { threshold: parseFloat(lThresholds.level3), level: 3 },
+                { threshold: parseFloat(lThresholds.level2), level: 2 },
+                { threshold: parseFloat(lThresholds.level1), level: 1 },
+                { threshold: 0, level: 0 }
+            ];
+            
+            const targetLevel = rules.studentPassThreshold !== undefined ? parseFloat(rules.studentPassThreshold) : 50;
+
+            // 2. Weights
+            const wDirect = (rules.finalWeightage?.direct || 80) / 100;
+            const wIndirect = (rules.finalWeightage?.indirect || 20) / 100;
+
+            const tools = course.assessment_tools || [];
+            const seeTool = tools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE' || t.name === 'Semester End Exam');
+            const internalTools = tools.filter(t => t !== seeTool && t.type !== 'Improvement Test');
+            
+            // A. SEE Calculation
+            let seePassedCount = 0;
+            if (seeTool) {
+                courseStudents.forEach(student => {
+                    const record = courseMarks.find(m => m.student === student.id && (m.assessment_name === seeTool.name || m.assessment_name === 'SEE'));
+                    if (record && record.scores) {
+                        const score = Object.values(record.scores).reduce((a, b) => a + (parseInt(b)||0), 0);
+                        if (score >= (seeTool.maxMarks * targetLevel / 100)) seePassedCount++;
                     }
                 });
-                if (count > 0) averages[outcome.id] = sum / count;
+            }
+            const seePercent = (seePassedCount / (courseStudents.length || 1)) * 100;
+            const seeLevel = thresholds.find(t => seePercent >= t.threshold)?.level || 0;
+
+            // B. CIE Calculation
+            const coLevels = {};
+            (course.cos || []).forEach(co => {
+                let coTotal = 0, coPassed = 0;
+                internalTools.forEach(tool => {
+                    if (tool.coDistribution?.[co.id]) {
+                        courseStudents.forEach(student => {
+                            const record = courseMarks.find(m => m.student === student.id && m.assessment_name === tool.name);
+                            const score = parseInt(record?.scores?.[co.id] || 0);
+                            coTotal++;
+                            if (score >= (parseInt(tool.coDistribution[co.id]) * targetLevel / 100)) coPassed++;
+                        });
+                    }
+                });
+                const cieLevel = thresholds.find(t => ((coTotal > 0 ? (coPassed/coTotal)*100 : 0) >= t.threshold))?.level || 0;
+                
+                const indirectVal = parseFloat(course.settings?.indirect_attainment?.[co.id] || 3);
+                const directVal = (cieLevel + seeLevel) / 2;
+                
+                coLevels[co.id] = (wDirect * directVal) + (wIndirect * indirectVal);
             });
-            return averages;
+
+            // C. PO Mapping
+            const poAttainment = {};
+            outcomes.forEach(outcome => {
+                let wSum = 0, wCount = 0;
+                (course.cos || []).forEach(co => {
+                    const mapVal = parseFloat(courseMatrix[co.id]?.[outcome.id]);
+                    if (!isNaN(mapVal)) {
+                        wSum += (mapVal * (coLevels[co.id] || 0)) / 3;
+                        wCount++;
+                    }
+                });
+                if (wCount > 0) poAttainment[outcome.id] = wSum / wCount;
+            });
+
+            return poAttainment;
         };
 
-        const courseAverages = courses.map(course => ({
+        const courseRows = courses.map(course => ({
             course,
-            averages: calculateCourseAverage(course),
-        })).sort((a, b) => a.course.semester - b.course.semester || a.course.code.localeCompare(b.course.code));
+            attainment: getCourseAttainment(course)
+        })).sort((a, b) => a.course.code.localeCompare(b.course.code));
 
-        const averageData = {};
+        const directAttainment = {};
         outcomes.forEach(outcome => {
-            let sum = 0;
-            let count = 0;
-            courseAverages.forEach(ca => {
-                if (ca.averages[outcome.id]) {
-                    sum += ca.averages[outcome.id];
+            let sum = 0, count = 0;
+            courseRows.forEach(row => {
+                if (row.attainment[outcome.id] !== undefined) {
+                    sum += row.attainment[outcome.id];
                     count++;
                 }
             });
-            if (count > 0) averageData[outcome.id] = sum / count;
+            if (count > 0) directAttainment[outcome.id] = sum / count;
         });
 
-        const exitData = surveyData.exitSurvey || {};
-        const employerData = surveyData.employerSurvey || {};
-        const alumniData = surveyData.alumniSurvey || {};
+        // Surveys
+        const exitData = surveyData.exit_survey || {};
+        const employerData = surveyData.employer_survey || {};
+        const alumniData = surveyData.alumni_survey || {};
 
         const indirectAttainment = {};
         outcomes.forEach(outcome => {
@@ -129,129 +218,156 @@ const DepartmentAttainmentPage = () => {
             indirectAttainment[outcome.id] = divisor > 0 ? total / divisor : 0;
         });
 
-        const directWeight = (config?.attainmentRules?.finalWeightage?.direct || 80) / 100;
-        const indirectWeight = (config?.attainmentRules?.finalWeightage?.indirect || 20) / 100;
+        // Final Summary based on REFERENCE SCHEME
+        const refScheme = schemes.find(s => s.id === selectedSchemeId);
+        const refRules = refScheme?.settings?.attainment_rules || {};
+        const wDirectProgram = (refRules.finalWeightage?.direct || 80) / 100;
+        const wIndirectProgram = (refRules.finalWeightage?.indirect || 20) / 100;
 
-        const cRow = {};
-        const dRow = {};
-        const totalAttainment = {};
-        const percentage = {};
+        const rowC = {}; 
+        const rowD = {};
+        const totalRow = {};
 
-        outcomes.forEach(outcome => {
-            const a = averageData[outcome.id] || 0;
-            const b = indirectAttainment[outcome.id] || 0;
-            const c = a * directWeight;
-            const d = b * indirectWeight;
-            const total = c + d;
+        outcomes.forEach(o => {
+            const id = o.id;
+            const dir = directAttainment[id] || 0;
+            const ind = indirectAttainment[id] || 0;
             
-            cRow[outcome.id] = c;
-            dRow[outcome.id] = d;
-            totalAttainment[outcome.id] = total;
-            percentage[outcome.id] = (total / 3) * 100;
+            rowC[id] = dir * wDirectProgram;
+            rowD[id] = ind * wIndirectProgram;
+            totalRow[id] = rowC[id] + rowD[id];
         });
-        
+
         const summaryRows = [
-            { label: 'Average', data: averageData, bold: true },
-            { label: 'Direct Attainment [A]', data: averageData, bold: true, bgColor: 'bg-yellow-50 dark:bg-yellow-900/20' },
+            { label: 'Direct Attainment (Avg of Courses) [A]', data: directAttainment, bold: true, bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
             { label: 'Program Exit Survey', data: exitData },
             { label: 'Employer Survey', data: employerData },
             { label: 'Alumni Survey', data: alumniData },
-            { label: 'Indirect Attainment [B]', data: indirectAttainment, bold: true, bgColor: 'bg-yellow-50 dark:bg-yellow-900/20' },
-            { label: `C=A*${directWeight}`, data: cRow },
-            { label: `D=B*${indirectWeight}`, data: dRow },
-            { label: 'Total attainment [C+D]', data: totalAttainment, bold: true, bgColor: 'bg-green-50 dark:bg-green-900/20' },
-            { label: '%', data: percentage, bold: true, isPercentage: true, bgColor: 'bg-blue-50 dark:bg-blue-900/20' },
+            { label: 'Indirect Attainment (Avg of Surveys) [B]', data: indirectAttainment, bold: true, bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
+            { 
+                label: `weighted Direct [C = A * ${(wDirectProgram * 100).toFixed(0)}%]`, 
+                data: rowC 
+            },
+            { 
+                label: `weighted Indirect [D = B * ${(wIndirectProgram * 100).toFixed(0)}%]`, 
+                data: rowD 
+            },
+            { label: 'Total Attainment [C + D]', data: totalRow, bold: true, bg: 'bg-green-50 dark:bg-green-900/20' },
         ];
 
-        return { allOutcomes: outcomes, courseAverages, summaryRows };
-    }, [courses, outcomes, matrix, surveyData, config]);
+        return { courseRows, summaryRows };
 
-    const selectedDepartment = departments.find(d => d.id === selectedDepartmentId);
+    }, [selectedDeptId, courses, outcomes, allStudents, allMarks, matrix, surveyData, schemes, selectedSchemeId]);
 
     return (
-        <div className="space-y-6">
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Department Attainment Analytics</h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-1">
-                View the consolidated "Result of Evaluation" for each academic department.
-            </p>
+        <div className="space-y-6 p-6">
+            <div className="flex flex-col gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Department Attainment</h1>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1">
+                        View and analyze Consolidated Evaluation Results for any department.
+                    </p>
+                </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Select Department</CardTitle>
-                    <CardDescription>Choose a department to view its attainment report.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <select
-                        value={selectedDepartmentId}
-                        onChange={(e) => setSelectedDepartmentId(e.target.value)}
-                        className="block w-full sm:w-96 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        aria-label="Select a department"
-                    >
-                        {departments.map(dept => (
-                            <option key={dept.id} value={dept.id}>{dept.name}</option>
-                        ))}
-                    </select>
-                </CardContent>
-            </Card>
+                {/* CONTROLS BAR */}
+                <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 items-center">
+                    
+                    {/* Department Selector */}
+                    <div className="flex-1 w-full">
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Select Department</label>
+                        <div className="relative">
+                            <Building2 className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                            <select 
+                                value={selectedDeptId}
+                                onChange={(e) => setSelectedDeptId(e.target.value)}
+                                className="pl-10 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            >
+                                <option value="">-- Choose Department --</option>
+                                {departments.map(d => (
+                                    <option key={d.id} value={d.id}>{d.name} ({d.id})</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* Reference Scheme Selector */}
+                    <div className="flex-1 w-full">
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Summary Logic (Weights)</label>
+                        <div className="relative">
+                            <Filter className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                            <select 
+                                value={selectedSchemeId}
+                                onChange={(e) => setSelectedSchemeId(e.target.value)}
+                                className="pl-10 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                disabled={!selectedDeptId}
+                            >
+                                {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             {loading ? (
-                <div className="text-center py-10">Loading data...</div>
-            ) : selectedDepartment && attainmentData ? (
+                 <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>
+            ) : !selectedDeptId ? (
+                <div className="text-center py-20 bg-gray-50 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+                    <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-bold text-gray-500">No Department Selected</h3>
+                    <p className="text-gray-400 mt-1">Please select a department above to view the evaluation results.</p>
+                </div>
+            ) : calculateData.courseRows.length > 0 ? (
                 <Card>
-                    <CardHeader>
-                        <CardTitle>Result of Evaluation for {selectedDepartment.name}</CardTitle>
-                        <CardDescription>Consolidated table of PO/PSO attainment combining direct and indirect assessments.</CardDescription>
-                    </CardHeader>
                     <CardContent className="pt-6">
-                         <div className="overflow-x-auto border dark:border-gray-600 rounded-lg">
+                        <div className="overflow-x-auto border dark:border-gray-600 rounded-lg">
                             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                <thead className="bg-gray-50 dark:bg-gray-700/50">
+                                <thead className="bg-gray-100 dark:bg-gray-800">
                                     <tr>
-                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-200 dark:border-gray-600">
-                                            COURSE
+                                        <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600 min-w-[180px]">
+                                            COMPONENT
                                         </th>
-                                        {attainmentData.allOutcomes.map(outcome => (
-                                            <th key={outcome.id} scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider border-r border-gray-200 dark:border-gray-600">
-                                                <b>{outcome.id}</b>
+                                        {outcomes.map(outcome => (
+                                            <th key={outcome.id} className="px-3 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider border-r border-gray-300 dark:border-gray-600 min-w-[4rem]">
+                                                {outcome.id}
                                             </th>
                                         ))}
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                    {attainmentData.courseAverages.map(({ course, averages }) => (
-                                        <tr key={course.id}>
-                                            <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 dark:text-white border-r border-gray-200 dark:border-gray-600">
-                                                {course.code}
+                                    {/* COURSE ROWS */}
+                                    {calculateData.courseRows.map(({ course, attainment }) => (
+                                        <tr key={course.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600">
+                                                <div className="flex flex-col">
+                                                    <span className="font-bold">{course.code}</span>
+                                                    <span className="text-[10px] text-gray-400">
+                                                        {course.scheme_details?.name ? course.scheme_details.name.substring(0,15)+'...' : 'Default'}
+                                                    </span>
+                                                </div>
                                             </td>
-                                            {attainmentData.allOutcomes.map(outcome => {
-                                                const avg = averages[outcome.id];
-                                                const displayValue = avg ? avg.toFixed(2) : '-';
-                                                return (
-                                                    <td key={`${course.id}-${outcome.id}`} className="px-3 py-4 whitespace-nowrap text-center text-sm border-r border-gray-200 dark:border-gray-600">
-                                                        <span className={avg ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}>
-                                                            {displayValue}
-                                                        </span>
-                                                    </td>
-                                                );
-                                            })}
+                                            {outcomes.map(outcome => (
+                                                <td key={outcome.id} className="px-3 py-2 whitespace-nowrap text-center text-sm border-r border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400">
+                                                    {attainment[outcome.id] ? attainment[outcome.id].toFixed(2) : '-'}
+                                                </td>
+                                            ))}
                                         </tr>
                                     ))}
-                                    {attainmentData.summaryRows.map(row => (
-                                        <tr key={row.label} className={row.bgColor}>
-                                            <td className={`px-4 py-3 whitespace-nowrap text-sm ${row.bold ? 'font-bold' : 'font-medium'} text-gray-900 dark:text-white border-r border-gray-200 dark:border-gray-600`}>
+
+                                    {/* SUMMARY ROWS */}
+                                    {calculateData.summaryRows.map((row, idx) => (
+                                        <tr key={idx} className={row.bg || ''}>
+                                            <td className={`px-4 py-3 whitespace-nowrap text-sm ${row.bold ? 'font-bold text-gray-900 dark:text-white' : 'font-medium text-gray-600 dark:text-gray-300'} border-r border-gray-300 dark:border-gray-600 border-t`}>
                                                 {row.label}
                                             </td>
-                                            {attainmentData.allOutcomes.map(outcome => {
-                                                const value = row.data[outcome.id];
-                                                let displayValue = '-';
-                                                if (typeof value === 'number') displayValue = value.toFixed(2);
-                                                else if (value && !isNaN(parseFloat(value))) displayValue = parseFloat(value).toFixed(2);
-
+                                            {outcomes.map(outcome => {
+                                                const val = row.data[outcome.id];
+                                                let display = '-';
+                                                if (val !== undefined && val !== null) {
+                                                    display = typeof val === 'number' ? val.toFixed(2) : parseFloat(val).toFixed(2);
+                                                }
                                                 return (
-                                                    <td key={`${row.label}-${outcome.id}`} className={`px-3 py-3 whitespace-nowrap text-center text-sm ${row.bold ? 'font-bold' : ''} border-r border-gray-200 dark:border-gray-600`}>
-                                                        <span className={value || value === 0 ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}>
-                                                            {displayValue}{row.isPercentage && value ? '%' : ''}
-                                                        </span>
+                                                    <td key={outcome.id} className={`px-3 py-3 whitespace-nowrap text-center text-sm ${row.bold ? 'font-bold text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'} border-r border-gray-300 dark:border-gray-600 border-t`}>
+                                                        {display}
                                                     </td>
                                                 );
                                             })}
@@ -263,7 +379,9 @@ const DepartmentAttainmentPage = () => {
                     </CardContent>
                 </Card>
             ) : (
-                <div className="text-center py-10 text-gray-500">No data available for this department.</div>
+                <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <p className="text-gray-500">No course data found for this department.</p>
+                </div>
             )}
         </div>
     );
