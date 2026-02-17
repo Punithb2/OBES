@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
+import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
 import { Loader2, AlertCircle } from 'lucide-react';
@@ -37,7 +37,6 @@ const CoPoAttainmentPage = () => {
                 setAllStudents(studentsRes.data);
                 setAllMarks(marksRes.data);
                 
-                // Sort Outcomes
                 const sortById = (a, b) => {
                     const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
                     const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
@@ -46,7 +45,6 @@ const CoPoAttainmentPage = () => {
                 setPos(posRes.data.sort(sortById));
                 setPsos(psosRes.data.sort(sortById));
 
-                // Process Matrix
                 const mBuilder = {};
                 const matrixData = Array.isArray(matrixRes.data) ? matrixRes.data : []; 
                 matrixData.forEach(item => {
@@ -91,7 +89,7 @@ const CoPoAttainmentPage = () => {
         const settings = selectedCourse.scheme_details?.settings || {};
         const rules = settings.attainment_rules || {}; 
 
-        // --- A. DYNAMIC THRESHOLD PARSING ---
+        // A. Dynamic Thresholds
         let levelsDict = rules.levelThresholds;
         if (!levelsDict || Object.keys(levelsDict).length === 0) {
             levelsDict = { level3: 70, level2: 60, level1: 50 };
@@ -104,34 +102,78 @@ const CoPoAttainmentPage = () => {
             }))
             .sort((a, b) => b.threshold - a.threshold);
 
-        // --- B. OTHER SETTINGS ---
         const targetLevel = rules.studentPassThreshold !== undefined ? parseFloat(rules.studentPassThreshold) : 50;
-
-        // Weightage Logic - Ensure Valid Defaults
         const weightage = rules.finalWeightage || { direct: 80, indirect: 20 };
 
-        // Process Assessment Tools
-        const tools = selectedCourse.assessment_tools || [];
-        const seeTool = tools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE' || t.name === 'Semester End Exam');
-        const internalTools = tools.filter(t => t !== seeTool && t.type !== 'Improvement Test');
+        // B. Process Assessment Tools
+        const rawTools = selectedCourse.assessment_tools || [];
+        const seeTool = rawTools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE' || t.name === 'Semester End Exam');
+        const improvementTools = rawTools.filter(t => t.type === 'Improvement Test');
+        const internalTools = rawTools.filter(t => t !== seeTool && t.type !== 'Improvement Test');
 
-        // Transform Internal Tools
-        const assessments = internalTools.map(tool => {
-            const parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
+        // Helper to process a tool into usable format
+        const processTool = (tool) => {
+            let parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
                 co: coId,
                 max: parseInt(max) || 0
             }));
+
+            // Fallback for unmapped tools (e.g. Activity) - Map to ALL COs
+            if (parts.length === 0) {
+                const allCourseCos = selectedCourse.cos || [];
+                parts = allCourseCos.map(co => ({
+                    co: co.id,
+                    max: tool.maxMarks 
+                }));
+            }
+
+            const colSpan = (parts.length * 3) + 1; 
             
             return {
                 id: tool.name, 
                 title: tool.name,
+                type: tool.type,
                 total: tool.maxMarks || 0,
-                parts: parts
+                scaleTo: tool.weightage || 0,
+                parts: parts,
+                colSpan: colSpan
             };
+        };
+
+        // Grouping Logic
+        const groupedTools = [];
+        const processedToolsFlat = []; 
+
+        const buckets = {};
+
+        internalTools.forEach(tool => {
+            const match = tool.name.match(/(\d+)/);
+            const num = match ? match[1] : 'Other';
+            if (!buckets[num]) buckets[num] = [];
+            buckets[num].push(tool);
         });
 
-        // --- FIX: ROBUST SEE MAPPING LOGIC ---
-        // If coDistribution is missing OR EMPTY keys, use ALL COs from the course.
+        Object.keys(buckets).sort().forEach(key => {
+            const groupTools = buckets[key].map(processTool);
+            
+            groupTools.sort((a, b) => {
+                if (a.type.includes('Internal')) return -1;
+                return 1;
+            });
+
+            processedToolsFlat.push(...groupTools);
+
+            const groupMax = groupTools.reduce((sum, t) => sum + t.total, 0);
+
+            groupedTools.push({
+                id: `group-${key}`,
+                title: key === 'Other' ? 'Other Assessments' : `Internal Assessment ${key}`,
+                tools: groupTools,
+                groupMax: groupMax,
+                totalColSpan: groupTools.reduce((sum, t) => sum + t.colSpan, 0)
+            });
+        });
+
         const seeDistributionKeys = seeTool?.coDistribution ? Object.keys(seeTool.coDistribution) : [];
         const seeCoMap = seeDistributionKeys.length > 0 
             ? seeDistributionKeys 
@@ -139,14 +181,18 @@ const CoPoAttainmentPage = () => {
 
         const seeConfig = {
             total: seeTool?.maxMarks || 100,
-            coMap: seeCoMap
+            scaleTo: seeTool?.weightage || 0,
+            coMap: seeCoMap,
+            colSpan: 3 
         };
 
         return {
             targetLevel,
             sortedLevels,
             weightage,
-            assessments,
+            groupedTools, 
+            assessments: processedToolsFlat, 
+            improvementTools, 
             see: seeConfig,
             schemeName: selectedCourse.scheme_details?.name || 'Default Scheme'
         };
@@ -164,23 +210,86 @@ const CoPoAttainmentPage = () => {
             return match ? match.level : 0;
         };
 
+        const isStudentAbsent = (val) => {
+            const v = String(val || '').toUpperCase().trim();
+            return ['AB', 'ABSENT', 'A', 'NA', '-'].includes(v);
+        };
+
+        const getScoreTotal = (scores) => {
+            if (!scores) return 0;
+            return Object.values(scores).reduce((sum, val) => {
+                const num = parseFloat(val);
+                return sum + (isNaN(num) ? 0 : num);
+            }, 0);
+        };
+
         return students.map(student => {
             const row = { student, assessments: {} };
 
-            // Process Internal Assessments
             courseConfig.assessments.forEach(assessment => {
-                const markRecord = allMarks.find(m => 
+                // 1. Get Original Marks
+                let markRecord = allMarks.find(m => 
                     m.student === student.id && 
                     m.course === selectedCourseId && 
                     m.assessment_name === assessment.id
                 );
+                let scores = markRecord?.scores || {};
+                let isOverridden = false;
 
-                const scores = markRecord?.scores || {};
+                // 2. CHECK FOR IMPROVEMENT OVERRIDE (Student Specific)
+                if (assessment.type === 'Internal Assessment') {
+                    // Iterate through ALL defined improvement tools
+                    for (const impTool of courseConfig.improvementTools) {
+                        
+                        // Robust Name Matching: Check if Improvement Tool is linked to THIS Assessment
+                        // Normalize strings to avoid case/space issues
+                        const impName = impTool.name.toLowerCase();
+                        const linkedName = (impTool.linkedAssessment || "").toLowerCase();
+                        const targetName = assessment.title.toLowerCase();
+
+                        // Match Conditions:
+                        // 1. Explicit Link matches (e.g. linkedAssessment = "Internal Assessment 1")
+                        // 2. Name contains target (e.g. "Improvement Test (Internal Assessment 1)")
+                        const isLinked = linkedName === targetName || impName.includes(targetName);
+
+                        if (isLinked) {
+                            // Find Marks for THIS student for the improvement tool
+                            const impRecord = allMarks.find(m => 
+                                m.student === student.id && 
+                                m.course === selectedCourseId && 
+                                m.assessment_name === impTool.name
+                            );
+
+                            // Check if student actually took the improvement test
+                            if (impRecord && impRecord.scores && Object.keys(impRecord.scores).length > 0) {
+                                const originalTotal = getScoreTotal(scores);
+                                const impTotal = getScoreTotal(impRecord.scores);
+
+                                // Strict Override: Only if Improvement Score is HIGHER
+                                if (impTotal > originalTotal) {
+                                    scores = impRecord.scores;
+                                    isOverridden = true;
+                                    break; // Stop looking once we found a better score for this IA
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. Process Scores (Original or Improved)
                 let currentTotal = 0;
-
                 const parts = assessment.parts.map(part => {
-                    const obtained = parseFloat(scores[part.co] || 0);
-                    currentTotal += obtained;
+                    let rawVal = scores[part.co];
+                    
+                    // Fallback for tools with total-only entry
+                    if (rawVal === undefined && Object.keys(scores).length === 1) {
+                         rawVal = Object.values(scores)[0]; 
+                    }
+
+                    const absent = isStudentAbsent(rawVal);
+                    const obtained = absent ? 0 : parseFloat(rawVal || 0);
+                    
+                    if (!absent) currentTotal += obtained;
 
                     const percentage = part.max > 0 ? (obtained / part.max) * 100 : 0;
                     const level = getLevel(percentage);
@@ -189,14 +298,16 @@ const CoPoAttainmentPage = () => {
                         co: part.co,
                         max: part.max,
                         obtained: obtained,
-                        targetMet: percentage >= courseConfig.targetLevel,
+                        isAbsent: absent,
+                        targetMet: !absent && percentage >= courseConfig.targetLevel,
                         score: level         
                     };
                 });
 
                 row.assessments[assessment.id] = {
                     total: currentTotal,
-                    parts: parts
+                    parts: parts,
+                    isOverridden: isOverridden
                 };
             });
 
@@ -208,15 +319,23 @@ const CoPoAttainmentPage = () => {
             );
             
             let seeObtained = 0;
+            let seeAbsent = false;
+
             if (seeRecord && seeRecord.scores) {
-                 seeObtained = Object.values(seeRecord.scores).reduce((a, b) => a + (parseFloat(b)||0), 0);
+                 const rawVals = Object.values(seeRecord.scores);
+                 if (rawVals.some(v => isStudentAbsent(v))) {
+                     seeAbsent = true;
+                 } else {
+                     seeObtained = rawVals.reduce((a, b) => a + (parseFloat(b)||0), 0);
+                 }
             }
             
             const seePercent = courseConfig.see.total > 0 ? (seeObtained / courseConfig.see.total) * 100 : 0;
             
             row.see = {
                 obtained: seeObtained,
-                targetMet: seePercent >= courseConfig.targetLevel,
+                isAbsent: seeAbsent,
+                targetMet: !seeAbsent && seePercent >= courseConfig.targetLevel,
                 score: getLevel(seePercent)
             };
 
@@ -228,22 +347,33 @@ const CoPoAttainmentPage = () => {
     const summary = useMemo(() => {
         if (!data || !courseConfig) return null;
 
-        const s = { assessments: {}, see: { yCount: 0 } };
+        const s = { assessments: {}, see: { yCount: 0, totalMarks: 0, absentCount: 0 } };
 
         courseConfig.assessments.forEach(assessment => {
             s.assessments[assessment.id] = { parts: [] };
             assessment.parts.forEach((_, idx) => {
-                s.assessments[assessment.id].parts[idx] = { yCount: 0 };
+                s.assessments[assessment.id].parts[idx] = { yCount: 0, totalMarks: 0, absentCount: 0 };
             });
         });
 
         data.forEach(row => {
             courseConfig.assessments.forEach(assessment => {
                 row.assessments[assessment.id].parts.forEach((p, idx) => {
-                    if (p.targetMet) s.assessments[assessment.id].parts[idx].yCount++;
+                    if (p.isAbsent) {
+                        s.assessments[assessment.id].parts[idx].absentCount++;
+                    } else {
+                        s.assessments[assessment.id].parts[idx].totalMarks += p.obtained;
+                        if (p.targetMet) s.assessments[assessment.id].parts[idx].yCount++;
+                    }
                 });
             });
-            if (row.see.targetMet) s.see.yCount++;
+            
+            if (row.see.isAbsent) {
+                s.see.absentCount++;
+            } else {
+                s.see.totalMarks += row.see.obtained;
+                if (row.see.targetMet) s.see.yCount++;
+            }
         });
 
         return s;
@@ -254,7 +384,6 @@ const CoPoAttainmentPage = () => {
         if (!data || !summary || !courseConfig || !selectedCourse) return null;
 
         const coStats = {};
-        
         const allCos = new Set();
         courseConfig.assessments.forEach(a => a.parts.forEach(p => allCos.add(p.co)));
         (selectedCourse.cos || []).forEach(c => allCos.add(c.id));
@@ -264,20 +393,16 @@ const CoPoAttainmentPage = () => {
         });
 
         data.forEach(row => {
-            // Collect SEE Level
-            if (row.see) {
-                 // Map SEE score to ALL COs in the map (which now defaults to ALL if empty)
+            if (!row.see.isAbsent) {
                  courseConfig.see.coMap.forEach(coId => {
                      if (coStats[coId]) coStats[coId].seeLevels.push(row.see.score);
                  });
             }
-
-            // Collect CIE Levels
             courseConfig.assessments.forEach(assessment => {
                 const studentAssessment = row.assessments[assessment.id];
                 if (studentAssessment && studentAssessment.parts) {
                     studentAssessment.parts.forEach(studentPart => {
-                        if (coStats[studentPart.co]) {
+                        if (!studentPart.isAbsent && coStats[studentPart.co]) {
                             coStats[studentPart.co].cieLevels.push(studentPart.score);
                         }
                     });
@@ -286,45 +411,25 @@ const CoPoAttainmentPage = () => {
         });
 
         const indirectMap = selectedCourse.settings?.indirect_attainment || {};
-        
         const wDirect = parseFloat(courseConfig.weightage?.direct) || 80;
         const wIndirect = parseFloat(courseConfig.weightage?.indirect) || 20;
 
         const rows = Array.from(allCos).sort().map(co => {
             const stats = coStats[co];
-            
-            // Average of Student Levels for CIE
-            const cieAvg = stats.cieLevels.length 
-                ? stats.cieLevels.reduce((a, b) => a + b, 0) / stats.cieLevels.length 
-                : 0;
-
-            // Average of Student Levels for SEE
-            const seeAvg = stats.seeLevels.length 
-                ? stats.seeLevels.reduce((a, b) => a + b, 0) / stats.seeLevels.length 
-                : 0;
-
+            const cieAvg = stats.cieLevels.length ? stats.cieLevels.reduce((a, b) => a + b, 0) / stats.cieLevels.length : 0;
+            const seeAvg = stats.seeLevels.length ? stats.seeLevels.reduce((a, b) => a + b, 0) / stats.seeLevels.length : 0;
             const directAttainment = (cieAvg + seeAvg) / 2;
-            
             let indirectVal = 3;
             if (indirectMap[co] !== undefined) {
                 const parsed = parseFloat(indirectMap[co]);
                 if (!isNaN(parsed)) indirectVal = parsed;
             }
-
             const scoreIndex = ((wDirect / 100) * directAttainment) + ((wIndirect / 100) * indirectVal);
 
-            return {
-                co,
-                cieLevel: cieAvg, 
-                seeLevel: seeAvg, 
-                direct: directAttainment,
-                indirect: indirectVal,
-                scoreIndex
-            };
+            return { co, cieLevel: cieAvg, seeLevel: seeAvg, direct: directAttainment, indirect: indirectVal, scoreIndex };
         });
 
         const rowCount = rows.length || 1; 
-
         const avgRow = {
             co: 'AVERAGE',
             cieLevel: rows.length ? rows.reduce((s, r) => s + r.cieLevel, 0) / rowCount : 0,
@@ -410,34 +515,60 @@ const CoPoAttainmentPage = () => {
     
     const renderTableHeader = () => (
         <thead className="text-center text-xs font-bold text-gray-800 bg-gray-200 dark:bg-gray-800 dark:text-gray-200 uppercase border-b-2 border-gray-400">
+            {/* ROW 1: Group Headers */}
             <tr>
-                <th rowSpan={2} className="sticky left-0 z-20 bg-gray-300 dark:bg-gray-800 border-r border-gray-400 p-2 w-12">Sl.No.</th>
-                <th rowSpan={2} className="sticky left-12 z-20 bg-gray-300 dark:bg-gray-800 border-r border-gray-400 p-2 w-28">USN</th>
-                <th rowSpan={2} className="sticky left-40 z-20 bg-gray-300 dark:bg-gray-800 border-r border-gray-400 p-2 w-48">Name</th>
+                <th rowSpan={3} className="sticky left-0 z-20 bg-gray-300 dark:bg-gray-800 border-r border-gray-400 p-2 w-12 align-middle">Sl.No.</th>
+                <th rowSpan={3} className="sticky left-12 z-20 bg-gray-300 dark:bg-gray-800 border-r border-gray-400 p-2 w-28 align-middle">USN</th>
+                <th rowSpan={3} className="sticky left-40 z-20 bg-gray-300 dark:bg-gray-800 border-r border-gray-400 p-2 w-48 align-middle">Name</th>
                 
-                {courseConfig?.assessments.map(assessment => (
-                    <th key={assessment.id} colSpan={assessment.parts.length * 3 + 1} className="bg-purple-300 dark:bg-purple-900 border-r border-gray-400 py-2">
-                        {assessment.title} ({assessment.total})
+                {courseConfig?.groupedTools.map(group => (
+                    <th key={group.id} colSpan={group.totalColSpan} className="bg-purple-400 dark:bg-purple-900 border-r border-gray-400 py-2 border-b">
+                        {group.title} <span className="text-[10px]">({group.groupMax})</span>
                     </th>
                 ))}
-                <th colSpan={3} className="bg-orange-300 dark:bg-orange-900 border-l border-gray-400">SEE ({courseConfig?.see?.total})</th>
+                
+                <th rowSpan={2} colSpan={3} className="bg-orange-300 dark:bg-orange-900 border-l border-gray-400 align-middle">
+                    SEE <span className="text-[10px] block">(Max: {courseConfig?.see?.total})</span>
+                </th>
             </tr>
+
+            {/* ROW 2: Tool Name Headers */}
+            <tr>
+                {courseConfig?.groupedTools.map(group => (
+                    <React.Fragment key={group.id}>
+                        {group.tools.map(tool => (
+                            <th key={tool.id} colSpan={tool.colSpan} className="bg-purple-200 dark:bg-purple-800/50 border-r border-gray-400 py-1 border-b">
+                                {tool.type === 'Internal Assessment' ? 'Internal' : tool.title.split(' ').slice(0, 1)} 
+                                <span className="text-[9px] ml-1">({tool.total})</span>
+                            </th>
+                        ))}
+                    </React.Fragment>
+                ))}
+            </tr>
+
+            {/* ROW 3: CO, Lvl & Target Headers */}
             <tr>
                 {courseConfig?.assessments.map(assessment => (
                     <React.Fragment key={assessment.id}>
                         {assessment.parts.map((part, idx) => (
                             <React.Fragment key={`head-${assessment.id}-${idx}`}>
-                                <th className="bg-green-100 dark:bg-green-900/30 border-r border-gray-300 px-1">{part.co}({part.max})</th>
-                                <th className="bg-white dark:bg-gray-700 border-r border-gray-300 px-1">Lvl</th>
-                                <th className="bg-yellow-200 dark:bg-yellow-700 border-r border-gray-300 px-1">{'>'}{courseConfig.targetLevel}%</th>
+                                <th className="bg-green-100 dark:bg-green-900/30 border-r border-gray-300 px-1 py-1 min-w-[50px]">
+                                    {part.co} <span className="text-[9px]">({part.max})</span>
+                                </th>
+                                <th className="bg-blue-50 dark:bg-blue-900/50 border-r border-gray-300 px-1 py-1 min-w-[30px]" title="Level">Lvl</th>
+                                <th className="bg-yellow-200 dark:bg-yellow-700 border-r border-gray-300 px-1 py-1 min-w-[40px] text-[10px]">
+                                    Target {'>'} {courseConfig.targetLevel}%
+                                </th>
                             </React.Fragment>
                         ))}
-                        <th className="bg-blue-100 dark:bg-blue-900 border-r border-gray-300 px-1">Tot</th>
+                        <th className="bg-blue-100 dark:bg-blue-900 border-r border-gray-300 px-1 py-1 min-w-[40px]">Tot</th>
                     </React.Fragment>
                 ))}
-                <th className="bg-orange-100 dark:bg-orange-900/30 border-r border-gray-300 px-1">Obt</th>
-                <th className="bg-white dark:bg-gray-700 border-r border-gray-300 px-1">Lvl</th>
-                <th className="bg-yellow-200 dark:bg-yellow-700 border-r border-gray-300 px-1">Met</th>
+                
+                {/* SEE Columns */}
+                <th className="bg-orange-100 dark:bg-orange-900/30 border-r border-gray-300 px-1 py-1 min-w-[40px]">Obt</th>
+                <th className="bg-blue-50 dark:bg-blue-900/50 border-r border-gray-300 px-1 py-1 min-w-[30px]">Lvl</th>
+                <th className="bg-yellow-200 dark:bg-yellow-700 border-r border-gray-300 px-1 py-1 min-w-[40px]">Met?</th>
             </tr>
         </thead>
     );
@@ -446,8 +577,11 @@ const CoPoAttainmentPage = () => {
         if (!data || !summary) return null;
         
         const labels = [
-            { key: 'yCount', title: "Number of 'Y's" },
-            { key: 'percentage', title: "% Above Pass" },
+            { key: 'avgMarks', title: "Class Average" },
+            { key: 'absentCount', title: "No. of Absents (AB)" },
+            { key: 'yCount', title: "No. of Students >= Target" },
+            { key: 'percentage', title: "% Above Target" },
+            { key: 'level', title: "Attainment Level" }
         ];
 
         return (
@@ -462,24 +596,65 @@ const CoPoAttainmentPage = () => {
                                 {assessment.parts.map((part, pIdx) => {
                                     const stats = summary.assessments[assessment.id].parts[pIdx];
                                     const totalStudents = data.length || 1;
+                                    const attempts = totalStudents - stats.absentCount;
+                                    const validAttempts = attempts > 0 ? attempts : 1;
+                                    
+                                    const percent = (stats.yCount / validAttempts) * 100;
+                                    
                                     let val = '';
+                                    if (labelRow.key === 'avgMarks') val = (stats.totalMarks / validAttempts).toFixed(1);
+                                    if (labelRow.key === 'absentCount') val = stats.absentCount;
                                     if (labelRow.key === 'yCount') val = stats.yCount;
-                                    if (labelRow.key === 'percentage') val = ((stats.yCount / totalStudents) * 100).toFixed(1) + '%';
+                                    if (labelRow.key === 'percentage') val = percent.toFixed(1) + '%';
+                                    if (labelRow.key === 'level') {
+                                        const match = courseConfig.sortedLevels.find(l => percent >= l.threshold);
+                                        val = match ? match.level : 0;
+                                    }
                                     
                                     return (
                                         <React.Fragment key={`foot-${assessment.id}-${pIdx}`}>
-                                            <td></td><td></td>
                                             <td className="bg-[#8B5A2B] text-white border-r border-gray-300">{val}</td>
+                                            <td className="bg-gray-200 dark:bg-gray-700 border-r border-gray-300"></td> 
+                                            <td className="bg-gray-200 dark:bg-gray-700 border-r border-gray-300"></td> 
                                         </React.Fragment>
                                     );
                                 })}
-                                <td></td>
+                                <td></td> 
                             </React.Fragment>
                         ))}
-                         <td></td><td></td>
+                         <td className="bg-[#8B5A2B] text-white border-r border-gray-300">
+                            {(() => {
+                                const totalStudents = data.length || 1;
+                                const attempts = totalStudents - summary.see.absentCount;
+                                const validAttempts = attempts > 0 ? attempts : 1;
+                                if (labelRow.key === 'avgMarks') return (summary.see.totalMarks / validAttempts).toFixed(1);
+                                if (labelRow.key === 'absentCount') return summary.see.absentCount;
+                                return '';
+                            })()}
+                         </td>
+                         <td className="bg-[#8B5A2B] text-white border-r border-gray-300">
+                            {(() => {
+                                const totalStudents = data.length || 1;
+                                const attempts = totalStudents - summary.see.absentCount;
+                                const validAttempts = attempts > 0 ? attempts : 1;
+                                const percent = (summary.see.yCount / validAttempts) * 100;
+                                if (labelRow.key === 'level') {
+                                    const match = courseConfig.sortedLevels.find(l => percent >= l.threshold);
+                                    return match ? match.level : 0;
+                                }
+                                return '';
+                            })()}
+                         </td>
                          <td className="bg-[#8B5A2B] text-white">
-                            {labelRow.key === 'yCount' && summary.see.yCount}
-                            {labelRow.key === 'percentage' && ((summary.see.yCount / (data.length || 1))*100).toFixed(1)+'%'}
+                            {(() => {
+                                const totalStudents = data.length || 1;
+                                const attempts = totalStudents - summary.see.absentCount;
+                                const validAttempts = attempts > 0 ? attempts : 1;
+                                const percent = (summary.see.yCount / validAttempts) * 100;
+                                if (labelRow.key === 'yCount') return summary.see.yCount;
+                                if (labelRow.key === 'percentage') return percent.toFixed(1)+'%';
+                                return '';
+                            })()}
                          </td>
                     </tr>
                 ))}
@@ -540,14 +715,20 @@ const CoPoAttainmentPage = () => {
                                             
                                             {courseConfig.assessments.map(assessment => {
                                                 const aData = row.assessments[assessment.id];
+                                                const overrideClass = aData.isOverridden ? 'bg-yellow-50 dark:bg-yellow-900/20' : '';
+                                                
                                                 return (
                                                     <React.Fragment key={assessment.id}>
                                                         {aData.parts.map((part, pIdx) => (
                                                             <React.Fragment key={`row-${assessment.id}-${pIdx}`}>
-                                                                <td className="border-r border-gray-300 px-1 text-gray-500">{part.obtained}</td>
-                                                                <td className="border-r border-gray-300 px-1 font-semibold">{part.score}</td>
-                                                                <td className={`border-r border-gray-300 px-1 font-bold ${part.targetMet ? 'text-green-600' : 'text-red-500'}`}>
-                                                                    {part.targetMet ? 'Y' : 'N'}
+                                                                <td className={`border-r border-gray-300 px-1 text-gray-500 ${overrideClass}`}>
+                                                                    {part.isAbsent ? 'AB' : part.obtained}
+                                                                </td>
+                                                                <td className={`border-r border-gray-300 px-1 font-semibold text-blue-600 dark:text-blue-400 ${overrideClass}`}>
+                                                                    {part.isAbsent ? '-' : part.score}
+                                                                </td>
+                                                                <td className={`border-r border-gray-300 px-1 font-bold ${part.targetMet ? 'text-green-600' : 'text-red-500'} ${overrideClass}`}>
+                                                                    {part.isAbsent ? '-' : (part.targetMet ? 'Y' : 'N')}
                                                                 </td>
                                                             </React.Fragment>
                                                         ))}
@@ -555,10 +736,14 @@ const CoPoAttainmentPage = () => {
                                                     </React.Fragment>
                                                 );
                                             })}
-                                            <td className="border-r border-gray-300 px-2">{row.see.obtained}</td>
-                                            <td className="border-r border-gray-300 px-2">{row.see.score}</td>
+                                            <td className="border-r border-gray-300 px-2">
+                                                {row.see.isAbsent ? 'AB' : row.see.obtained}
+                                            </td>
+                                            <td className="border-r border-gray-300 px-2 font-semibold text-blue-600 dark:text-blue-400">
+                                                {row.see.isAbsent ? '-' : row.see.score}
+                                            </td>
                                             <td className={`border-r border-gray-300 px-2 font-bold ${row.see.targetMet ? 'text-green-600' : 'text-red-500'}`}>
-                                                {row.see.targetMet ? 'Y' : 'N'}
+                                                {row.see.isAbsent ? '-' : (row.see.targetMet ? 'Y' : 'N')}
                                             </td>
                                         </tr>
                                     ))}
