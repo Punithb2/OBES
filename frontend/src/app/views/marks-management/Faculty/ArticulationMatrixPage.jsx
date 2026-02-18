@@ -74,8 +74,8 @@ const ArticulationMatrixPage = () => {
   
   // Matrix State: Maps CourseID -> Matrix Data
   const [articulationMatrix, setArticulationMatrix] = useState({});
-  // FIX: Track Database IDs for updates (CourseID -> MatrixRecordID)
-  const [matrixIds, setMatrixIds] = useState({});
+  // FIX: Track if a record exists in DB (CourseID -> Boolean)
+  const [matrixExists, setMatrixExists] = useState({});
 
   // Comparison States (for dirty check)
   const [initialData, setInitialData] = useState({ courses: [], matrix: {} });
@@ -109,7 +109,6 @@ const ArticulationMatrixPage = () => {
                   api.get(`/courses/?assigned_faculty=${user.id}`), // Ensure filtering works
                   api.get('/pos/'),
                   api.get('/psos/'),
-                  // FIX: Correct Endpoint
                   api.get('/articulation-matrix/') 
               ]);
 
@@ -126,20 +125,21 @@ const ArticulationMatrixPage = () => {
 
               // Process Matrix Data
               const matrixMap = {};
-              const idMap = {}; // Store record IDs
+              const existsMap = {}; 
 
               if (Array.isArray(matrixRes.data)) {
                   matrixRes.data.forEach(item => {
                       if (item.course) {
                           if (item.matrix) matrixMap[item.course] = item.matrix;
-                          idMap[item.course] = item.id; // Capture ID for PATCH requests
+                          // FIX: Since course is the PK, just mark it as existing
+                          existsMap[item.course] = true;
                       }
                   });
               } else {
                   console.warn("Unexpected matrix format:", matrixRes.data);
               }
               setArticulationMatrix(matrixMap);
-              setMatrixIds(idMap);
+              setMatrixExists(existsMap);
 
               // Set initial state for dirty checking
               setInitialData({
@@ -152,7 +152,8 @@ const ArticulationMatrixPage = () => {
               }
           } catch (error) {
               console.error("Failed to load articulation data", error);
-              showModal('error', 'Load Failed', 'Could not load course data. Please check your connection.');
+              // Handle 401 specifically if needed, but generic error works for now
+              showModal('error', 'Load Failed', 'Could not load course data. If this persists, try logging out and back in.');
           } finally {
               setLoading(false);
           }
@@ -237,7 +238,7 @@ const ArticulationMatrixPage = () => {
     const handleGenerateMatrix = () => {
         if (!selectedCourse || !syllabusFile) return;
 
-        // Mock AI Generation Logic (Preserved)
+        // Mock AI Generation Logic
         const courseMatrix = {};
         (selectedCourse.cos || []).forEach(co => {
             const coMatrix = {};
@@ -266,7 +267,7 @@ const ArticulationMatrixPage = () => {
     if (!selectedCourse) return;
     const currentCos = selectedCourse.cos || [];
     const nextNum = currentCos.length + 1;
-    const newCoId = `${selectedCourse.id}.CO${nextNum}`; // Improved naming convention
+    const newCoId = `${selectedCourse.id}.CO${nextNum}`;
     
     const newCo = {
         id: newCoId,
@@ -323,21 +324,21 @@ const ArticulationMatrixPage = () => {
 
           // 2. Save Matrix
           const matrixPayload = {
-              course: selectedCourse.id, // Ensure course ID is sent
+              course: selectedCourse.id, 
               matrix: articulationMatrix[selectedCourse.id] || {}
           };
           
-          // Check if we have a record ID for this course's matrix
-          const recordId = matrixIds[selectedCourse.id];
+          // FIX: Check if matrix exists for this course
+          const exists = matrixExists[selectedCourse.id];
 
-          if (recordId) {
-              // Update existing using ID (FIX: Correct URL)
-              await api.patch(`/articulation-matrix/${recordId}/`, matrixPayload);
+          if (exists) {
+              // Update existing using Course ID as the Key
+              await api.patch(`/articulation-matrix/${selectedCourse.id}/`, matrixPayload);
           } else {
-              // Create new (FIX: Correct URL)
-              const res = await api.post(`/articulation-matrix/`, matrixPayload);
-              // Update local ID map with the new ID
-              setMatrixIds(prev => ({ ...prev, [selectedCourse.id]: res.data.id }));
+              // Create new
+              await api.post(`/articulation-matrix/`, matrixPayload);
+              // Update local existence map
+              setMatrixExists(prev => ({ ...prev, [selectedCourse.id]: true }));
           }
 
           // Reset dirty state
@@ -349,7 +350,11 @@ const ArticulationMatrixPage = () => {
           showModal('success', 'Saved Successfully', 'Articulation matrix and course outcomes have been saved.');
       } catch (error) {
           console.error("Failed to save changes", error);
-          showModal('error', 'Save Failed', 'There was an error saving your changes. Please try again.');
+          if (error.response && error.response.status === 401) {
+             showModal('error', 'Session Expired', 'Your session has expired. Please log in again.');
+          } else {
+             showModal('error', 'Save Failed', 'There was an error saving your changes. Please try again.');
+          }
       }
   };
 

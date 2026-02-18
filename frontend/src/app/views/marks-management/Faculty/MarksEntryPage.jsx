@@ -104,9 +104,7 @@ const MarksEntryPage = () => {
     const fetchCourses = async () => {
         if (!user) return;
         try {
-            // FIX: Ensure we use the correct query param if backend supports filtering
             const res = await api.get(`/courses/`);
-            // Client-side filter to be safe
             const myCourses = res.data.filter(c => String(c.assigned_faculty) === String(user.id));
             setCourses(myCourses);
             
@@ -124,7 +122,6 @@ const MarksEntryPage = () => {
     courses.find(c => c.id === selectedCourseId), 
   [courses, selectedCourseId]);
 
-  // FIX: Use 'assessment_tools' (snake_case) from Django
   const assessmentOptions = useMemo(() => {
       return selectedCourse?.assessment_tools || [];
   }, [selectedCourse]);
@@ -147,7 +144,7 @@ const MarksEntryPage = () => {
       const tool = assessmentOptions.find(t => t.name === selectedAssessmentName);
       if (!tool) return null;
 
-      const isSEE = tool.type === 'Semester End Exam' || tool.name === 'Semester End Exam';
+      const isSEE = tool.type === 'Semester End Exam' || tool.name === 'SEE' || tool.name === 'Semester End Exam';
       const isActivity = tool.type === 'Activity' || tool.name.startsWith('Activity');
       const isImprovement = tool.type === 'Improvement Test';
 
@@ -205,7 +202,6 @@ const MarksEntryPage = () => {
     try {
         const studentsRes = await api.get(`/students/`);
         const allStudents = studentsRes.data;
-        // FIX: Add safety check '?.includes'
         const students = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
         setCurrentStudents(students);
 
@@ -213,10 +209,16 @@ const MarksEntryPage = () => {
         const allMarks = marksRes.data;
         const existingMarks = allMarks.filter(m => m.course === selectedCourseId && m.assessment_name === selectedAssessmentName);
 
+        // Logic for fetching marks to compare AGAINST (if this is NOT an improvement test)
         if (!currentToolConfig.isImprovement) {
             const improvementTool = assessmentOptions.find(t => t.type === 'Improvement Test');
             if (improvementTool) {
-                const impMarks = allMarks.filter(m => m.course === selectedCourseId && m.assessment_name === improvementTool.name);
+                // Find marks from the improvement test that TARGET the current assessment
+                const impMarks = allMarks.filter(m => 
+                    m.course === selectedCourseId && 
+                    m.assessment_name === improvementTool.name &&
+                    m.improvement_test_for === selectedAssessmentName // Check the new field
+                );
                 setImprovementMarksList(impMarks);
             } else {
                 setImprovementMarksList([]);
@@ -232,8 +234,9 @@ const MarksEntryPage = () => {
             initialMarks[record.student] = record.scores || {};
             initialMeta[record.student] = record;
             
-            if (record.scores && record.scores._improvementTarget) {
-                initialMap[record.student] = record.scores._improvementTarget;
+            // Populate the dropdown using the new field
+            if (record.improvement_test_for) {
+                initialMap[record.student] = record.improvement_test_for;
             }
         });
 
@@ -261,6 +264,7 @@ const MarksEntryPage = () => {
   // --- Handlers ---
   const handleImprovementTargetChange = (studentId, targetName) => {
       setImprovementMap(prev => ({ ...prev, [studentId]: targetName }));
+      // Clear marks when target changes to prevent data mismatch
       setMarks(prev => {
           const newMarks = { ...prev };
           newMarks[studentId] = {}; 
@@ -269,11 +273,7 @@ const MarksEntryPage = () => {
   };
 
   const openComparisonModal = (student) => {
-      const impRecord = improvementMarksList.find(r => {
-          return r.student === student.id && 
-                 r.scores && 
-                 r.scores._improvementTarget === selectedAssessmentName;
-      });
+      const impRecord = improvementMarksList.find(r => r.student === student.id);
 
       if (impRecord) {
            setComparisonData({
@@ -328,20 +328,22 @@ const MarksEntryPage = () => {
     try {
         const promises = currentStudents.map(async (student) => {
             let scores = { ...marks[student.id] };
+            let improvementFor = null;
             
             if (currentToolConfig.isImprovement) {
-                const target = improvementMap[student.id];
+                improvementFor = improvementMap[student.id];
                 const existing = marksMeta[student.id];
 
-                if (!target) {
+                // If no target selected, delete any existing record (student not writing)
+                if (!improvementFor) {
                     if (existing) {
                         await api.delete(`/marks/${existing.id}/`);
                     }
                     return; 
                 }
-                scores._improvementTarget = target;
             }
             
+            // Clean empty keys
             const cleanScores = {};
             Object.keys(scores).forEach(key => {
                 if (scores[key] !== undefined && scores[key] !== null && scores[key] !== '') {
@@ -358,16 +360,14 @@ const MarksEntryPage = () => {
                 course: selectedCourseId,
                 assessment_name: selectedAssessmentName,
                 scores: cleanScores,
+                improvement_test_for: improvementFor // Send the new field
             };
 
-            // Create a simpler ID to avoid slashes or complex chars in URL if used as PK
             const customId = `M_${selectedCourseId}_${student.id}_${selectedAssessmentName.replace(/[^a-zA-Z0-9]/g, '')}`;
 
             if (existingRecord) {
                 await api.patch(`/marks/${existingRecord.id}/`, payload);
             } else {
-                // If backend expects 'id', include it, otherwise let DB auto-gen (if changed to AutoField)
-                // Since Mark model uses CharField PK, we MUST provide it or ensure backend handles it.
                 await api.post('/marks/', { ...payload, id: customId });
             }
         });
@@ -652,11 +652,7 @@ const MarksEntryPage = () => {
                       }
 
                       // --- STANDARD ASSESSMENT ROW LOGIC ---
-                      const impMarkRecord = improvementMarksList.find(r => 
-                          r.student === student.id && 
-                          r.scores && 
-                          r.scores._improvementTarget === selectedAssessmentName
-                      );
+                      const impMarkRecord = improvementMarksList.find(r => r.student === student.id);
                       const hasImprovement = !!impMarkRecord;
                       
                       return (

@@ -96,6 +96,7 @@ class Mark(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE)
     assessment_name = models.CharField(max_length=100) # e.g., "Internal Assessment 1"
     scores = models.JSONField(default=dict) # e.g., {"Part A": 10, "Part B": 12}
+    improvement_test_for = models.CharField(max_length=100, blank=True, null=True)
 
     class Meta:
         unique_together = ('student', 'course', 'assessment_name')
