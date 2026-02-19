@@ -78,21 +78,31 @@ const IndirectAttainmentPage = () => {
                     api.get('/psos/')
                 ]);
                 
+                // FIX: Safely extract paginated results
+                const fetchedPos = posRes.data.results || posRes.data || [];
+                const fetchedPsos = psosRes.data.results || psosRes.data || [];
+
                 // Sort naturally
                 const sortById = (a, b) => {
-                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
-                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    const numA = parseInt((a.id || '').match(/\d+/)?.[0] || 0);
+                    const numB = parseInt((b.id || '').match(/\d+/)?.[0] || 0);
                     return numA - numB;
                 };
-                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
+                
+                const safePos = Array.isArray(fetchedPos) ? [...fetchedPos].sort(sortById) : [];
+                const safePsos = Array.isArray(fetchedPsos) ? [...fetchedPsos].sort(sortById) : [];
+
+                setOutcomes([...safePos, ...safePsos]);
 
                 // Fetch Existing Survey Data
-                // Filter by department to find the specific record
                 const surveyRes = await api.get(`/surveys/?department=${deptId}`);
                 
-                if (surveyRes.data && surveyRes.data.length > 0) {
+                // FIX: Safely extract paginated survey results
+                const fetchedSurveys = surveyRes.data.results || surveyRes.data;
+                
+                if (Array.isArray(fetchedSurveys) && fetchedSurveys.length > 0) {
                     // Data exists: Load it
-                    const existingData = surveyRes.data[0];
+                    const existingData = fetchedSurveys[0];
                     setSurveyId(existingData.id); // Save ID for PUT/PATCH later
                     setSurveyRatings({
                         exitSurvey: existingData.exit_survey || {},

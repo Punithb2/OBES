@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../sh
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
 import { Loader2, User, BookOpen, Printer } from 'lucide-react';
-import { useLocation } from 'react-router-dom'; // Added useLocation
+import { useLocation } from 'react-router-dom'; 
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -19,7 +19,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 const StudentIndividualReportPage = () => {
     const { user } = useAuth();
-    const location = useLocation(); // Hook for params
+    const location = useLocation(); 
     const [loading, setLoading] = useState(true);
 
     // Data States
@@ -37,20 +37,41 @@ const StudentIndividualReportPage = () => {
             if (!user) return;
             setLoading(true);
             try {
+                // Fetch all required data
                 const [coursesRes, studentsRes, marksRes] = await Promise.all([
                     api.get('/courses/'),
                     api.get('/students/'),
-                    api.get('/marks/')
+                    api.get('/marks/') 
                 ]);
-                setCourses(coursesRes.data);
-                setAllStudents(studentsRes.data);
-                setAllMarks(marksRes.data);
+
+                // Safely extract data from Django's paginated responses
+                const fetchedCourses = coursesRes.data.results || coursesRes.data;
+                const fetchedStudents = studentsRes.data.results || studentsRes.data;
+                const fetchedMarks = marksRes.data.results || marksRes.data;
+
+                // Filter courses for the logged-in faculty
+                const myCourses = Array.isArray(fetchedCourses)
+                    ? fetchedCourses.filter(c => String(c.assigned_faculty) === String(user.id))
+                    : [];
+
+                setCourses(myCourses);
+                
+                // FIX: Use the correct state setter names
+                setAllStudents(Array.isArray(fetchedStudents) ? fetchedStudents : []);
+                setAllMarks(Array.isArray(fetchedMarks) ? fetchedMarks : []);
+
+                // Auto-select course if available
+                if (myCourses.length > 0 && !selectedCourseId) {
+                    setSelectedCourseId(myCourses[0].id);
+                }
+
             } catch (error) {
-                console.error("Failed to load data", error);
+                console.error("Failed to load report data", error);
             } finally {
                 setLoading(false);
             }
         };
+
         fetchData();
     }, [user]);
 
@@ -60,57 +81,58 @@ const StudentIndividualReportPage = () => {
         return courses.filter(c => String(c.assigned_faculty) === String(user.id));
     }, [user, courses]);
 
-    // 3. Filter Students for Course
+    // 3. Filter Students for Course (FIXED WITH STRING MATCHING)
     const courseStudents = useMemo(() => {
         if (!selectedCourseId) return [];
-        return allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
+        return allStudents.filter(s => 
+            s.courses && s.courses.map(String).includes(String(selectedCourseId))
+        );
     }, [selectedCourseId, allStudents]);
 
     // Auto-select course (Priority to Location State)
     useEffect(() => {
-        // Check if data came from navigation
-        if (location.state?.courseId && assignedCourses.some(c => c.id === location.state.courseId)) {
-            setSelectedCourseId(location.state.courseId);
-        } 
-        // Fallback to first course if nothing selected
-        else if (assignedCourses.length > 0 && !selectedCourseId) {
-            setSelectedCourseId(assignedCourses[0].id);
+        if (location.state?.courseId && assignedCourses.some(c => String(c.id) === String(location.state.courseId))) {
+            setSelectedCourseId(String(location.state.courseId));
+        } else if (assignedCourses.length > 0 && !selectedCourseId) {
+            setSelectedCourseId(String(assignedCourses[0].id));
         }
-    }, [assignedCourses, location.state]); // Added location.state dep
+    }, [assignedCourses, location.state]); 
 
     // Auto-select student (Priority to Location State)
     useEffect(() => {
-        // Check if data came from navigation AND matches current course
-        if (location.state?.studentId && location.state?.courseId === selectedCourseId) {
-             // Verify student belongs to this course
-             if (courseStudents.some(s => s.id === location.state.studentId)) {
-                 setSelectedStudentId(location.state.studentId);
-                 return; // Skip fallback
+        if (location.state?.studentId && String(location.state?.courseId) === String(selectedCourseId)) {
+             if (courseStudents.some(s => String(s.id) === String(location.state.studentId))) {
+                 setSelectedStudentId(String(location.state.studentId));
+                 return; 
              }
         }
 
-        // Fallback to first student
         if (courseStudents.length > 0 && !selectedStudentId) {
-            setSelectedStudentId(courseStudents[0].id);
+            setSelectedStudentId(String(courseStudents[0].id));
         } else if (courseStudents.length === 0) {
             setSelectedStudentId('');
         }
     }, [courseStudents, location.state, selectedCourseId]);
 
-    const selectedCourse = courses.find(c => c.id === selectedCourseId);
-    const selectedStudent = courseStudents.find(s => s.id === selectedStudentId);
+    const selectedCourse = courses.find(c => String(c.id) === String(selectedCourseId));
+    const selectedStudent = courseStudents.find(s => String(s.id) === String(selectedStudentId));
 
     // 4. Generate Report Data
     const reportData = useMemo(() => {
         if (!selectedCourse || !selectedStudent) return null;
 
         const tools = selectedCourse.assessment_tools || [];
-        const studentMarks = allMarks.filter(m => m.student === selectedStudent.id && m.course === selectedCourseId);
+        const studentMarks = allMarks.filter(m => String(m.student) === String(selectedStudent.id) && String(m.course) === String(selectedCourseId));
 
         const assessments = tools.map(tool => {
             const record = studentMarks.find(m => m.assessment_name === tool.name);
             const scores = record?.scores || {};
-            const totalObtained = Object.values(scores).reduce((a, b) => a + (parseInt(b)||0), 0);
+            
+            // Ignore metadata keys like _improvementTarget
+            const totalObtained = Object.entries(scores).reduce((sum, [key, val]) => {
+                if (key.startsWith('_')) return sum;
+                return sum + (parseInt(val) || 0);
+            }, 0);
             
             const breakdown = [];
             if (tool.coDistribution) {
@@ -140,14 +162,15 @@ const StudentIndividualReportPage = () => {
 
         const cos = selectedCourse.cos || [];
         const coPerformance = cos.map(co => {
+            const coIdString = typeof co === 'string' ? co : co.id;
             let coTotalMax = 0;
             let coTotalObtained = 0;
 
             tools.forEach(tool => {
-                if (tool.coDistribution && tool.coDistribution[co.id]) {
+                if (tool.coDistribution && tool.coDistribution[coIdString]) {
                     const record = studentMarks.find(m => m.assessment_name === tool.name);
-                    const max = parseInt(tool.coDistribution[co.id]);
-                    const obtained = parseInt(record?.scores?.[co.id] || 0);
+                    const max = parseInt(tool.coDistribution[coIdString]);
+                    const obtained = parseInt(record?.scores?.[coIdString] || 0);
                     
                     coTotalMax += max;
                     coTotalObtained += obtained;
@@ -156,7 +179,7 @@ const StudentIndividualReportPage = () => {
 
             const percentage = coTotalMax > 0 ? (coTotalObtained / coTotalMax) * 100 : 0;
             return {
-                co: co.id,
+                co: coIdString,
                 percentage: percentage
             };
         });
@@ -196,7 +219,7 @@ const StudentIndividualReportPage = () => {
                         value={selectedCourseId}
                         onChange={(e) => {
                             setSelectedCourseId(e.target.value);
-                            setSelectedStudentId(''); // Reset student when course changes manually
+                            setSelectedStudentId(''); 
                         }}
                         className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     >

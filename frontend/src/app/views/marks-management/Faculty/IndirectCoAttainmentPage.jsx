@@ -2,213 +2,228 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
-import { Save, AlertCircle } from 'lucide-react';
+import { Loader2, Save, AlertCircle, CheckCircle, X } from 'lucide-react';
+
+// --- CUSTOM MODAL ---
+const CustomModal = ({ isOpen, onClose, config }) => {
+    if (!isOpen) return null;
+    const { title, message, type } = config;
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+                <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900/50">
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        {type === 'error' && <AlertCircle className="text-red-500 w-5 h-5" />}
+                        {type === 'success' && <CheckCircle className="text-green-500 w-5 h-5" />}
+                        {title}
+                    </h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+                <div className="p-6 text-sm text-gray-600 dark:text-gray-300">{message}</div>
+                <div className="p-4 border-t dark:border-gray-700 flex justify-end bg-gray-50 dark:bg-gray-900/50">
+                    <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700">
+                        OK
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const IndirectCoAttainmentPage = () => {
     const { user } = useAuth();
-    const [courses, setCourses] = useState([]);
     const [loading, setLoading] = useState(true);
-    
-    // Stores ratings keyed by course ID: { "C101": { "CO1": 2.4, "CO2": 3.0 } }
-    const [coRatings, setCoRatings] = useState({});
-    
-    // Filter courses assigned to the current faculty
-    const assignedCourses = useMemo(() => {
-        if (!user || !courses.length) return [];
-        // Ensure type safety (user.id might be int or string depending on auth provider)
-        return courses.filter(c => c.assigned_faculty == user.id);
-    }, [user, courses]);
-    
+    const [isSaving, setIsSaving] = useState(false);
+
+    const [courses, setCourses] = useState([]);
     const [selectedCourseId, setSelectedCourseId] = useState('');
-    
-    // 1. Fetch Courses
+    const [surveyValues, setSurveyValues] = useState({});
+
+    const [uiModal, setUiModal] = useState({ isOpen: false, type: 'alert', title: '', message: '' });
+    const showModal = (type, title, message) => setUiModal({ isOpen: true, type, title, message });
+    const closeModal = () => setUiModal(prev => ({ ...prev, isOpen: false }));
+
+    // 1. Fetch Courses and safely extract settings
     useEffect(() => {
         const fetchCourses = async () => {
+            if (!user) return;
+            setLoading(true);
             try {
-                setLoading(true);
                 const res = await api.get('/courses/');
-                setCourses(res.data);
                 
-                // Initialize ratings from existing course settings
-                const initialRatings = {};
-                res.data.forEach(c => {
-                    // Check if indirect_attainment exists in settings
-                    if (c.settings && c.settings.indirect_attainment) {
-                        initialRatings[c.id] = c.settings.indirect_attainment;
-                    } else {
-                        initialRatings[c.id] = {};
-                    }
+                // Safely handle paginated responses
+                const fetchedCourses = res.data.results || res.data;
+                const myCourses = Array.isArray(fetchedCourses) 
+                    ? fetchedCourses.filter(c => String(c.assigned_faculty) === String(user.id))
+                    : [];
+
+                // Initialize state mapped strictly by String IDs
+                const initialVals = {};
+                myCourses.forEach(c => {
+                    const settings = c.settings || {};
+                    initialVals[String(c.id)] = settings.indirect_attainment || {};
                 });
-                setCoRatings(initialRatings);
+
+                setCourses(myCourses);
+                setSurveyValues(initialVals);
                 
+                if (myCourses.length > 0) setSelectedCourseId(String(myCourses[0].id));
             } catch (error) {
                 console.error("Failed to load courses", error);
+                showModal('error', 'Error', 'Failed to load courses from the server.');
             } finally {
                 setLoading(false);
             }
         };
-
-        if (user) fetchCourses();
+        fetchCourses();
     }, [user]);
-    
-    // 2. Auto-select first course
-    useEffect(() => {
-        if (assignedCourses.length > 0 && !assignedCourses.some(c => c.id === selectedCourseId)) {
-            setSelectedCourseId(assignedCourses[0].id);
-        } else if (assignedCourses.length === 0) {
-            setSelectedCourseId('');
-        }
-    }, [assignedCourses, selectedCourseId]);
 
-    const selectedCourse = courses.find(c => c.id === selectedCourseId);
+    const selectedCourse = useMemo(() => 
+        courses.find(c => String(c.id) === String(selectedCourseId)), 
+    [courses, selectedCourseId]);
 
-    // 3. Handle Input Change
+    // 2. Handlers
     const handleRatingChange = (coId, value) => {
-        if (!selectedCourseId) return;
+        let numVal = value;
+        if (value !== '') {
+            numVal = parseFloat(value);
+            if (isNaN(numVal) || numVal < 0) numVal = 0;
+            if (numVal > 3) numVal = 3; // Max rating is 3.0
+        }
 
-        const numericValue = parseFloat(value);
-        setCoRatings(prevRatings => ({
-            ...prevRatings,
-            [selectedCourseId]: {
-                ...(prevRatings[selectedCourseId] || {}),
-                [coId]: value === '' ? '' : isNaN(numericValue) ? (prevRatings[selectedCourseId]?.[coId] || '') : Math.max(0, Math.min(3, numericValue))
+        setSurveyValues(prev => ({
+            ...prev,
+            [String(selectedCourseId)]: {
+                ...(prev[String(selectedCourseId)] || {}),
+                [coId]: value === '' ? '' : numVal
             }
         }));
     };
 
-    // 4. Save Changes to Backend
-    const handleSaveChanges = async () => {
+    const handleSave = async () => {
         if (!selectedCourse) return;
-        
+        setIsSaving(true);
         try {
-            // We update the 'settings' field of the course
-            // preserving other settings that might exist
-            const updatedSettings = {
-                ...selectedCourse.settings,
-                indirect_attainment: coRatings[selectedCourseId]
+            const courseDataToSave = surveyValues[String(selectedCourseId)] || {};
+            
+            // Merge with existing settings so we don't overwrite Admin attainment rules
+            const payload = {
+                settings: {
+                    ...(selectedCourse.settings || {}),
+                    indirect_attainment: courseDataToSave
+                }
             };
 
-            await api.patch(`/courses/${selectedCourseId}/`, {
-                settings: updatedSettings
-            });
-
-            // Update local courses state to reflect saved settings
-            setCourses(prev => prev.map(c => 
-                c.id === selectedCourseId ? { ...c, settings: updatedSettings } : c
+            await api.patch(`/courses/${selectedCourseId}/`, payload);
+            
+            // Update local state to reflect successful save
+            setCourses(courses.map(c => 
+                String(c.id) === String(selectedCourseId) ? { ...c, settings: payload.settings } : c
             ));
 
-            alert('Course End Survey ratings saved successfully!');
+            showModal('success', 'Saved Successfully', 'Course End Survey ratings have been updated.');
         } catch (error) {
-            console.error("Failed to save ratings", error);
-            alert("Failed to save changes. Please try again.");
+            console.error("Failed to save", error);
+            showModal('error', 'Save Failed', 'There was an error saving your ratings. Please try again.');
+        } finally {
+            setIsSaving(false);
         }
     };
 
-    if (loading) return <div className="p-8 text-center text-gray-500">Loading courses...</div>;
+    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-6 pb-10">
+            <CustomModal isOpen={uiModal.isOpen} onClose={closeModal} config={uiModal} />
+
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Indirect CO Attainment</h1>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1">
-                        Manage Course End Survey results to calculate indirect attainment for COs.
-                    </p>
+                    <p className="text-gray-500 dark:text-gray-400 mt-1">Course End Survey (CES) data entry.</p>
                 </div>
-                <button
-                    onClick={handleSaveChanges}
-                    disabled={!selectedCourse}
-                    className="mt-4 sm:mt-0 flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                >
-                    <Save className="w-4 h-4 mr-2" />
-                    Save Changes
-                </button>
+                
+                <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <select 
+                        value={selectedCourseId}
+                        onChange={(e) => setSelectedCourseId(String(e.target.value))}
+                        className="block w-full sm:w-64 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    >
+                        {courses.map(course => (
+                            <option key={course.id} value={course.id}>{course.code} - {course.name}</option>
+                        ))}
+                        {courses.length === 0 && <option>No courses assigned</option>}
+                    </select>
+                    
+                    <button 
+                        onClick={handleSave}
+                        disabled={isSaving || !selectedCourse}
+                        className="flex items-center justify-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50 transition-colors font-medium shadow-sm"
+                    >
+                        {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                        Save Ratings
+                    </button>
+                </div>
             </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Select Course</CardTitle>
-                    <CardDescription>Choose the course for which you want to enter survey data.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <select
-                        id="course-select"
-                        value={selectedCourseId}
-                        onChange={(e) => setSelectedCourseId(e.target.value)}
-                        className="block w-full sm:w-96 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        disabled={assignedCourses.length === 0}
-                    >
-                        {assignedCourses.length > 0 ? assignedCourses.map(course => (
-                            <option key={course.id} value={course.id}>{course.code} - {course.name}</option>
-                        )) : <option>No courses assigned</option>}
-                    </select>
-                </CardContent>
-            </Card>
-
             {selectedCourse ? (
-                <Card>
-                    <CardHeader>
+                <Card className="shadow-sm">
+                    <CardHeader className="bg-gray-50 dark:bg-gray-800/50 border-b dark:border-gray-700">
                         <CardTitle>Course End Survey: {selectedCourse.code}</CardTitle>
-                        <CardDescription>
-                            Enter the average rating (on a scale of 0-3) for each Course Outcome based on student feedback.
-                        </CardDescription>
+                        <CardDescription>Enter the average rating (on a scale of 0-3) for each Course Outcome based on student feedback.</CardDescription>
                     </CardHeader>
-                    <CardContent>
-                        {selectedCourse.cos && selectedCourse.cos.length > 0 ? (
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                    <thead className="bg-gray-50 dark:bg-gray-700/50">
-                                        <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase w-24">CO</th>
-                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Description</th>
-                                            <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase w-40">Rating (0-3)</th>
+                    <CardContent className="p-0">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                <thead className="bg-white dark:bg-gray-800">
+                                    <tr>
+                                        <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider w-24 border-r dark:border-gray-700">CO</th>
+                                        <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider">Description</th>
+                                        <th className="px-6 py-4 text-center text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider w-40 border-l dark:border-gray-700">Rating (0-3)</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
+                                    {(selectedCourse.cos || []).map(co => (
+                                        <tr key={co.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white border-r dark:border-gray-700">
+                                                {co.id.includes('.') ? co.id.split('.').pop() : co.id}
+                                            </td>
+                                            <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-300 font-medium">
+                                                {co.description}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-center border-l dark:border-gray-700">
+                                                <input 
+                                                    type="number"
+                                                    min="0"
+                                                    max="3"
+                                                    step="0.1"
+                                                    value={surveyValues[String(selectedCourseId)]?.[co.id] ?? ''}
+                                                    onChange={(e) => handleRatingChange(co.id, e.target.value)}
+                                                    className="w-20 text-center rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white font-bold"
+                                                    placeholder="0.0"
+                                                />
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                        {selectedCourse.cos.map(co => (
-                                            <tr key={co?.id || Math.random()}>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                                                    {/* FIX: Added Optional Chaining and fallback to prevent undefined 'includes' error */}
-                                                    {co?.id && co.id.includes('.') ? co.id.split('.')[1] : (co?.id || 'N/A')}
-                                                </td>
-                                                <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300">
-                                                    {co?.description || 'No description available'}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-center">
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        max="3"
-                                                        step="0.01"
-                                                        value={coRatings[selectedCourseId]?.[co?.id] ?? ''}
-                                                        onChange={(e) => co?.id && handleRatingChange(co.id, e.target.value)}
-                                                        className="w-24 h-10 text-center border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-primary-500 focus:border-primary-500"
-                                                        aria-label={`Rating for ${co?.id}`}
-                                                        disabled={!co?.id}
-                                                    />
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center py-10 text-gray-500">
-                                <AlertCircle className="w-10 h-10 mb-2 text-yellow-500" />
-                                <p>No Course Outcomes (COs) defined for this course.</p>
-                                <p className="text-sm">Please define COs in the Course Management page first.</p>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-            ) : (
-                <Card>
-                    <CardContent>
-                        <div className="text-center py-20 text-gray-500 dark:text-gray-400">
-                            <p>Please select a course to enter indirect attainment data.</p>
+                                    ))}
+                                    {(!selectedCourse.cos || selectedCourse.cos.length === 0) && (
+                                        <tr>
+                                            <td colSpan="3" className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                                                No Course Outcomes defined for this subject. Please add them in the Course Configuration.
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
                     </CardContent>
                 </Card>
+            ) : (
+                <div className="p-12 text-center text-gray-500 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
+                    <AlertCircle className="mx-auto h-12 w-12 text-gray-400 mb-2" />
+                    <h3 className="text-lg font-medium">Select a Course</h3>
+                    <p>Please select a course to enter Indirect CO Attainment data.</p>
+                </div>
             )}
         </div>
     );

@@ -28,11 +28,13 @@ const ImprovementActionsPage = () => {
     const [courses, setCourses] = useState([]);
     const [outcomes, setOutcomes] = useState([]);
     const [matrix, setMatrix] = useState({});
-    const [surveyData, setSurveyData] = useState({ exitSurvey: {}, employerSurvey: {}, alumniSurvey: {} });
-    const [config, setConfig] = useState(null);
+    const [surveyData, setSurveyData] = useState({ exit_survey: {}, employer_survey: {}, alumni_survey: {} });
+    const [schemes, setSchemes] = useState([]);
+    
+    // NEW: Store backend-calculated CO reports for each course
+    const [courseReports, setCourseReports] = useState({});
 
     // Target Threshold (Outcomes below this value will be flagged)
-    // You can also fetch this from config if you want it dynamic
     const THRESHOLD = 2.0; 
 
     // 1. Fetch Data
@@ -44,35 +46,69 @@ const ImprovementActionsPage = () => {
                 setLoading(true);
                 const deptId = user.department;
 
-                const [coursesRes, posRes, psosRes, matrixRes, configRes, surveyRes] = await Promise.all([
-                    api.get(`/courses/?departmentId=${deptId}`),
+                const [coursesRes, posRes, psosRes, matrixRes, schemesRes, surveyRes] = await Promise.all([
+                    api.get(`/courses/?department=${deptId}`), // Fixed to use 'department'
                     api.get('/pos/'),
                     api.get('/psos/'),
-                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: {} })),
-                    api.get('/configurations/global/').catch(() => ({ data: null })),
-                    api.get(`/surveys/?department=${deptId}`).catch(() => ({ data: {} }))
+                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: { results: [] } })),
+                    api.get('/schemes/').catch(() => ({ data: { results: [] } })),
+                    api.get(`/surveys/?department=${deptId}`).catch(() => ({ data: { results: [] } }))
                 ]);
+
+                // FIX: Safely extract data handling Django's paginated responses
+                const fetchedCourses = coursesRes.data.results || coursesRes.data || [];
+                const fetchedPos = posRes.data.results || posRes.data || [];
+                const fetchedPsos = psosRes.data.results || psosRes.data || [];
+                const fetchedMatrix = matrixRes.data.results || matrixRes.data || [];
+                const fetchedSchemes = schemesRes.data.results || schemesRes.data || [];
+                const fetchedSurveys = surveyRes.data.results || surveyRes.data || [];
 
                 // Sort outcomes naturally
                 const sortById = (a, b) => {
-                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
-                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    const numA = parseInt((a.id || '').match(/\d+/)?.[0] || 0);
+                    const numB = parseInt((b.id || '').match(/\d+/)?.[0] || 0);
                     return numA - numB;
                 };
 
-                setCourses(coursesRes.data);
-                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
-                setMatrix(matrixRes.data || {});
-                setConfig(configRes.data);
+                const safePos = Array.isArray(fetchedPos) ? [...fetchedPos].sort(sortById) : [];
+                const safePsos = Array.isArray(fetchedPsos) ? [...fetchedPsos].sort(sortById) : [];
+                const safeCourses = Array.isArray(fetchedCourses) ? fetchedCourses : [];
+
+                setCourses(safeCourses);
+                setOutcomes([...safePos, ...safePsos]);
+                setSchemes(Array.isArray(fetchedSchemes) ? fetchedSchemes : []);
                 
-                // Handle Survey Data (array vs object check)
-                if (surveyRes.data) {
-                    if (Array.isArray(surveyRes.data) && surveyRes.data.length > 0) {
-                        setSurveyData(surveyRes.data[0]);
-                    } else if (!Array.isArray(surveyRes.data)) {
-                        setSurveyData(surveyRes.data); // Fallback if API returns object
-                    }
+                const mBuilder = {};
+                if (Array.isArray(fetchedMatrix)) {
+                    fetchedMatrix.forEach(item => {
+                        if (item.course && item.matrix) mBuilder[item.course] = item.matrix;
+                    });
                 }
+                setMatrix(mBuilder);
+                
+                // Handle Survey Data
+                if (Array.isArray(fetchedSurveys) && fetchedSurveys.length > 0) {
+                    setSurveyData(fetchedSurveys[0]);
+                }
+
+                // DYNAMICALLY FETCH PRE-CALCULATED REPORTS FOR ALL COURSES
+                const reportsMap = {};
+                const reportPromises = safeCourses.map(course => 
+                    api.get(`/reports/course-attainment/${course.id}/`).catch(() => null)
+                );
+                
+                const reports = await Promise.all(reportPromises);
+                
+                safeCourses.forEach((course, index) => {
+                    const res = reports[index];
+                    if (res && res.data && res.data.co_attainment) {
+                        reportsMap[course.id] = res.data.co_attainment;
+                    } else {
+                        reportsMap[course.id] = [];
+                    }
+                });
+                
+                setCourseReports(reportsMap);
 
             } catch (error) {
                 console.error("Failed to load data", error);
@@ -85,52 +121,63 @@ const ImprovementActionsPage = () => {
 
     // 2. Calculate Attainment
     const lowAttainmentData = useMemo(() => {
-        if (!outcomes.length) return [];
+        if (!outcomes.length || !courses.length) return [];
 
-        // Filter valid courses (those that have matrix data)
-        const validCourses = courses.map(course => {
-            const courseMatrix = matrix[course.id] || {}; // Handle missing matrix
-            const avgs = {};
-            
+        // Calculate Direct Attainment (Course Average mapped to POs)
+        const courseRows = courses.map(course => {
+            const coData = courseReports[course.id] || [];
+            const courseMatrix = matrix[course.id] || {};
+            const poAttainment = {};
+
             outcomes.forEach(outcome => {
-                let sum = 0, count = 0;
-                Object.values(courseMatrix).forEach(coMap => {
-                    const val = coMap[outcome.id];
-                    if (val) { sum += parseFloat(val); count++; }
+                let wSum = 0, wCount = 0;
+                coData.forEach(coItem => {
+                    const mapVal = parseFloat(courseMatrix[coItem.co]?.[outcome.id]);
+                    if (!isNaN(mapVal)) {
+                        wSum += (mapVal * coItem.score_index) / 3;
+                        wCount++;
+                    }
                 });
-                if (count > 0) avgs[outcome.id] = sum / count;
+                if (wCount > 0) poAttainment[outcome.id] = wSum / wCount;
             });
-            return { id: course.id, avgs };
+
+            return { course, attainment: poAttainment };
         });
 
-        // Calculate Direct Attainment (Average of courses)
         const directAttainment = {};
         outcomes.forEach(outcome => {
             let sum = 0, count = 0;
-            validCourses.forEach(c => {
-                if (c.avgs[outcome.id]) { sum += c.avgs[outcome.id]; count++; }
+            courseRows.forEach(row => {
+                if (row.attainment[outcome.id] !== undefined) {
+                    sum += row.attainment[outcome.id];
+                    count++;
+                }
             });
-            directAttainment[outcome.id] = count > 0 ? sum / count : 0;
+            if (count > 0) directAttainment[outcome.id] = sum / count;
         });
 
         // Calculate Indirect Attainment (Surveys)
-        const { exitSurvey = {}, employerSurvey = {}, alumniSurvey = {} } = surveyData;
+        const exitData = surveyData.exit_survey || {};
+        const employerData = surveyData.employer_survey || {};
+        const alumniData = surveyData.alumni_survey || {};
+
         const indirectAttainment = {};
-        
         outcomes.forEach(outcome => {
-            const v1 = parseFloat(exitSurvey[outcome.id]) || 0;
-            const v2 = parseFloat(employerSurvey[outcome.id]) || 0;
-            const v3 = parseFloat(alumniSurvey[outcome.id]) || 0;
+            const v1 = parseFloat(exitData[outcome.id]) || 0;
+            const v2 = parseFloat(employerData[outcome.id]) || 0;
+            const v3 = parseFloat(alumniData[outcome.id]) || 0;
             
-            // Calculate indirect only if we have data points
             let total = v1 + v2 + v3;
             let divisor = (v1 ? 1 : 0) + (v2 ? 1 : 0) + (v3 ? 1 : 0);
             indirectAttainment[outcome.id] = divisor > 0 ? total / divisor : 0;
         });
 
         // Calculate Final Attainment & Filter
-        const directWeight = (config?.attainmentRules?.finalWeightage?.direct || 80) / 100;
-        const indirectWeight = (config?.attainmentRules?.finalWeightage?.indirect || 20) / 100;
+        // Note: Using the first available scheme to get global weightages as a fallback
+        const refScheme = schemes.length > 0 ? schemes[0] : null;
+        const refRules = refScheme?.settings?.attainment_rules || {};
+        const directWeight = (refRules.finalWeightage?.direct || 80) / 100;
+        const indirectWeight = (refRules.finalWeightage?.indirect || 20) / 100;
 
         const lowPerformers = [];
 
@@ -140,7 +187,6 @@ const ImprovementActionsPage = () => {
             const total = (da * directWeight) + (ia * indirectWeight);
 
             // Only flag if attainment is non-zero AND below threshold
-            // (Ignoring 0 allows avoiding flagging outcomes that simply have no data yet)
             if (total > 0 && total < THRESHOLD) {
                 lowPerformers.push({
                     ...outcome,
@@ -152,7 +198,7 @@ const ImprovementActionsPage = () => {
 
         return lowPerformers;
 
-    }, [courses, outcomes, matrix, surveyData, config]);
+    }, [courses, outcomes, matrix, surveyData, schemes, courseReports]);
 
     if (loading) return <div className="p-12 text-center text-gray-500">Analyzing attainment data...</div>;
 

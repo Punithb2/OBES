@@ -7,7 +7,7 @@ const AdminDashboard = () => {
     const { user } = useAuth();
     const [stats, setStats] = useState({
         faculty: 0,
-        students: 0, // Added Students back (optional, but good to have)
+        students: 0,
         courses: 0,
         departmentName: ''
     });
@@ -23,25 +23,30 @@ const AdminDashboard = () => {
                 const deptId = user.department;
 
                 // 1. Fetch Department Details (Get Name)
-                // Django REST default: GET /departments/{id}/
                 const deptRes = await api.get(`/departments/${deptId}/`);
                 
                 // 2. Fetch Faculty Count
-                // Filter by role='faculty' AND department
                 const facultyRes = await api.get(`/users/?role=faculty&department=${deptId}`);
                 
-                // 3. Fetch Course Count
-                // Filter courses by departmentId
-                const coursesRes = await api.get(`/courses/?departmentId=${deptId}`);
+                // 3. Fetch Course Count (Fixed filter key to 'department' to match Django standards)
+                const coursesRes = await api.get(`/courses/?department=${deptId}`);
 
-                // 4. Fetch Student Count (Optional - added for completeness)
+                // 4. Fetch Student Count
                 const studentsRes = await api.get(`/students/?department=${deptId}`);
 
+                // Helper to safely extract count whether paginated or not
+                const getCount = (res) => {
+                    if (res.data && res.data.count !== undefined) return res.data.count; // Paginated
+                    if (res.data && Array.isArray(res.data.results)) return res.data.results.length; // Paginated Fallback
+                    if (Array.isArray(res.data)) return res.data.length; // Non-paginated
+                    return 0;
+                };
+
                 setStats({
-                    departmentName: deptRes.data.name,
-                    faculty: facultyRes.data.length,
-                    courses: coursesRes.data.length,
-                    students: studentsRes.data.length // Added this
+                    departmentName: deptRes.data.name || 'Department',
+                    faculty: getCount(facultyRes),
+                    courses: getCount(coursesRes),
+                    students: getCount(studentsRes) 
                 });
 
             } catch (error) {
@@ -86,7 +91,6 @@ const AdminDashboard = () => {
                     </CardContent>
                 </Card>
 
-                {/* Added Student Card for completeness */}
                 <Card>
                     <CardHeader>
                         <CardTitle>Total Students</CardTitle>

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
-import { Save, Pencil, Unlock, Check, Download, FileSpreadsheet, TrendingUp } from 'lucide-react';
+import { Save, Pencil, Unlock, Check, Download, FileSpreadsheet, TrendingUp, Loader2 } from 'lucide-react';
 
 // --- COMPARISON MODAL ---
 const ComparisonModal = ({ isOpen, onClose, data }) => {
@@ -76,7 +76,6 @@ const ComparisonModal = ({ isOpen, onClose, data }) => {
     );
 };
 
-
 const MarksEntryPage = () => {
   const { user } = useAuth();
   const [courses, setCourses] = useState([]);
@@ -94,9 +93,7 @@ const MarksEntryPage = () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   
-  // Modals State
   const [comparisonData, setComparisonData] = useState(null); 
-
   const fileInputRef = useRef(null);
 
   // 1. Fetch Assigned Courses
@@ -104,8 +101,10 @@ const MarksEntryPage = () => {
     const fetchCourses = async () => {
         if (!user) return;
         try {
+            // Updated to handle pagination if Course endpoint is paginated
             const res = await api.get(`/courses/`);
-            const myCourses = res.data.filter(c => String(c.assigned_faculty) === String(user.id));
+            const coursesData = res.data.results || res.data;
+            const myCourses = coursesData.filter(c => String(c.assigned_faculty) === String(user.id));
             setCourses(myCourses);
             
             if (myCourses.length > 0) {
@@ -126,7 +125,6 @@ const MarksEntryPage = () => {
       return selectedCourse?.assessment_tools || [];
   }, [selectedCourse]);
 
-  // Options for the dropdown inside the Improvement Test table
   const internalAssessmentOptions = useMemo(() => {
       return assessmentOptions.filter(t => t.type === 'Internal Assessment').map(t => t.name);
   }, [assessmentOptions]);
@@ -161,7 +159,6 @@ const MarksEntryPage = () => {
       } else if (isActivity) {
           config.questions = [{ q: 'Score', co: '-', max: tool.maxMarks || 0 }];
       } else if (!isImprovement) {
-          // Standard Internal Assessment columns
           config.questions = Object.entries(tool.coDistribution || {}).map(([coId, marks]) => ({
               q: coId,
               co: coId,
@@ -195,29 +192,29 @@ const MarksEntryPage = () => {
       setComparisonData(null);
   };
 
-  // 2. Fetch Students & Existing Marks
+  // 2. Fetch Targeted Students & Targeted Marks Only
   const handleLoadStudents = async () => {
     if (!selectedCourseId || !selectedAssessmentName || !currentToolConfig) return;
     setLoading(true);
     try {
+        // Handle pagination for students
         const studentsRes = await api.get(`/students/`);
-        const allStudents = studentsRes.data;
+        const allStudents = studentsRes.data.results || studentsRes.data;
         const students = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
         setCurrentStudents(students);
 
-        const marksRes = await api.get(`/marks/`);
-        const allMarks = marksRes.data;
-        const existingMarks = allMarks.filter(m => m.course === selectedCourseId && m.assessment_name === selectedAssessmentName);
+        // PERFORMANCE FIX: Fetch ONLY the marks for this specific course
+        const marksRes = await api.get(`/marks/?course=${selectedCourseId}`);
+        const allMarks = marksRes.data.results || marksRes.data;
+        
+        const existingMarks = allMarks.filter(m => m.assessment_name === selectedAssessmentName);
 
-        // Logic for fetching marks to compare AGAINST (if this is NOT an improvement test)
         if (!currentToolConfig.isImprovement) {
             const improvementTool = assessmentOptions.find(t => t.type === 'Improvement Test');
             if (improvementTool) {
-                // Find marks from the improvement test that TARGET the current assessment
                 const impMarks = allMarks.filter(m => 
-                    m.course === selectedCourseId && 
                     m.assessment_name === improvementTool.name &&
-                    m.improvement_test_for === selectedAssessmentName // Check the new field
+                    m.improvement_test_for === selectedAssessmentName 
                 );
                 setImprovementMarksList(impMarks);
             } else {
@@ -234,7 +231,6 @@ const MarksEntryPage = () => {
             initialMarks[record.student] = record.scores || {};
             initialMeta[record.student] = record;
             
-            // Populate the dropdown using the new field
             if (record.improvement_test_for) {
                 initialMap[record.student] = record.improvement_test_for;
             }
@@ -255,16 +251,14 @@ const MarksEntryPage = () => {
 
     } catch (error) {
         console.error("Failed to load data", error);
-        alert("Error loading data.");
+        alert("Error loading data. Check console for details.");
     } finally {
         setLoading(false);
     }
   };
 
-  // --- Handlers ---
   const handleImprovementTargetChange = (studentId, targetName) => {
       setImprovementMap(prev => ({ ...prev, [studentId]: targetName }));
-      // Clear marks when target changes to prevent data mismatch
       setMarks(prev => {
           const newMarks = { ...prev };
           newMarks[studentId] = {}; 
@@ -274,7 +268,6 @@ const MarksEntryPage = () => {
 
   const openComparisonModal = (student) => {
       const impRecord = improvementMarksList.find(r => r.student === student.id);
-
       if (impRecord) {
            setComparisonData({
                student,
@@ -289,15 +282,35 @@ const MarksEntryPage = () => {
   const handleMarksChange = (studentId, questionIdentifier, value, dynamicConfig = null) => {
     const config = dynamicConfig || currentToolConfig;
     const newMarks = JSON.parse(JSON.stringify(marks));
-    const max = config.questions.find(q => q.q === questionIdentifier)?.max || config.total;
+    
+    // FIX 1: Use '??' instead of '||' so if a CO is genuinely out of 0, it doesn't fall back to 30.
+    const questionMax = config.questions.find(q => q.q === questionIdentifier)?.max ?? config.total;
     
     if (value === '') {
         if (newMarks[studentId]) delete newMarks[studentId][questionIdentifier];
     } else {
         let numValue = parseInt(value, 10);
         if (!isNaN(numValue)) {
-            numValue = Math.max(0, Math.min(numValue, max));
+            // Cap the individual question score to its designated max
+            numValue = Math.max(0, Math.min(numValue, questionMax));
+            
             if (!newMarks[studentId]) newMarks[studentId] = {};
+            
+            // FIX 2: Check the CUMULATIVE total so it cannot exceed the test's total max marks
+            let otherQuestionsTotal = 0;
+            config.questions.forEach(q => {
+                if (q.q !== questionIdentifier && !q.q.startsWith('_')) {
+                    otherQuestionsTotal += Number(newMarks[studentId][q.q]) || 0;
+                }
+            });
+
+            // If adding this new score pushes the total over the limit, dial it back to the max possible
+            if (otherQuestionsTotal + numValue > config.total) {
+                numValue = Math.max(0, config.total - otherQuestionsTotal);
+                // Optional: You can alert the user here if you want
+                // alert(`Total marks cannot exceed ${config.total}`);
+            }
+
             newMarks[studentId][questionIdentifier] = numValue;
         }
     }
@@ -334,7 +347,6 @@ const MarksEntryPage = () => {
                 improvementFor = improvementMap[student.id];
                 const existing = marksMeta[student.id];
 
-                // If no target selected, delete any existing record (student not writing)
                 if (!improvementFor) {
                     if (existing) {
                         await api.delete(`/marks/${existing.id}/`);
@@ -343,7 +355,6 @@ const MarksEntryPage = () => {
                 }
             }
             
-            // Clean empty keys
             const cleanScores = {};
             Object.keys(scores).forEach(key => {
                 if (scores[key] !== undefined && scores[key] !== null && scores[key] !== '') {
@@ -360,7 +371,7 @@ const MarksEntryPage = () => {
                 course: selectedCourseId,
                 assessment_name: selectedAssessmentName,
                 scores: cleanScores,
-                improvement_test_for: improvementFor // Send the new field
+                improvement_test_for: improvementFor
             };
 
             const customId = `M_${selectedCourseId}_${student.id}_${selectedAssessmentName.replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -384,7 +395,6 @@ const MarksEntryPage = () => {
     }
   };
 
-  // --- CSV Handlers ---
   const handleDownloadTemplate = () => {
      if (!currentStudents.length) return;
      if (currentToolConfig.isImprovement) {
@@ -449,7 +459,6 @@ const MarksEntryPage = () => {
 
   return (
     <div className="space-y-6 relative">
-      {/* Success Notification */}
       {showSuccess && (
         <div className="fixed top-20 right-6 z-50 animate-in slide-in-from-top-5 duration-300">
             <div className="bg-white dark:bg-gray-800 border-l-4 border-green-500 shadow-lg rounded-r-lg flex items-center p-4 min-w-[300px]">
@@ -462,13 +471,8 @@ const MarksEntryPage = () => {
         </div>
       )}
 
-      <ComparisonModal 
-        isOpen={!!comparisonData}
-        onClose={() => setComparisonData(null)}
-        data={comparisonData}
-      />
+      <ComparisonModal isOpen={!!comparisonData} onClose={() => setComparisonData(null)} data={comparisonData} />
 
-      {/* Top Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Marks Entry</h1>
         
@@ -478,12 +482,11 @@ const MarksEntryPage = () => {
                 disabled={loading}
                 className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium shadow-sm transition-colors disabled:opacity-50"
             >
-                {loading ? 'Saving...' : <><Save className="w-4 h-4 mr-2" /> Save All</>}
+                {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving...</> : <><Save className="w-4 h-4 mr-2" /> Save All</>}
             </button>
         )}
       </div>
 
-      {/* Selection Card */}
       <Card>
         <CardHeader>
           <CardTitle>Select Course and Assessment</CardTitle>
@@ -495,9 +498,7 @@ const MarksEntryPage = () => {
                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Course</label>
                  <select 
                     value={selectedCourseId}
-                    onChange={(e) => {
-                        setSelectedCourseId(e.target.value);
-                    }}
+                    onChange={(e) => setSelectedCourseId(e.target.value)}
                     className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     disabled={courses.length === 0}
                 >
@@ -528,9 +529,10 @@ const MarksEntryPage = () => {
                <div className="sm:col-span-1 flex flex-col gap-3">
                  <button 
                     onClick={handleLoadStudents}
-                    className="w-full justify-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    className="w-full justify-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
                     disabled={!selectedCourseId || !selectedAssessmentName || loading}
                 >
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                     {loading ? 'Loading...' : 'Load Student List'}
                 </button>
 
@@ -550,7 +552,6 @@ const MarksEntryPage = () => {
         </CardContent>
       </Card>
 
-      {/* Marks Table */}
       {isTableVisible && selectedCourse && currentToolConfig && (
         <Card className="mt-6">
             <CardHeader>
@@ -594,7 +595,6 @@ const MarksEntryPage = () => {
                     {currentStudents.map(student => {
                       const isEditing = editableRows[student.id];
                       
-                      // --- IMPROVEMENT TEST ROW LOGIC ---
                       if (currentToolConfig.isImprovement) {
                           const targetAssessment = improvementMap[student.id];
                           const isNotWriting = !targetAssessment;
@@ -651,7 +651,6 @@ const MarksEntryPage = () => {
                           );
                       }
 
-                      // --- STANDARD ASSESSMENT ROW LOGIC ---
                       const impMarkRecord = improvementMarksList.find(r => r.student === student.id);
                       const hasImprovement = !!impMarkRecord;
                       
@@ -678,14 +677,12 @@ const MarksEntryPage = () => {
                             {calculateTotal(student.id)}
                           </td>
 
-                          {/* ACTIONS */}
                           <td className="px-4 py-4 text-center border-l dark:border-gray-600">
                             <div className="flex justify-center gap-2">
-                                {/* Compare button */}
                                 {hasImprovement && (
                                     <button
                                         onClick={() => openComparisonModal(student)}
-                                        className="p-2 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/30 rounded-mdBS transition-colors"
+                                        className="p-2 text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/30 rounded-md transition-colors"
                                         title="View Improvement Comparison"
                                     >
                                         <TrendingUp className="w-4 h-4" />

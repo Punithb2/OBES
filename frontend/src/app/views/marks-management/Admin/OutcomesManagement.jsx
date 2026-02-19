@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { Icons } from '../shared/icons';
-import ConfirmationModal from '../shared/ConfirmationModal'; // Fix Import if needed
+import ConfirmationModal from '../shared/ConfirmationModal'; 
 import api from '../../../services/api';
 
 const OutcomesManagement = () => {
@@ -15,9 +15,13 @@ const OutcomesManagement = () => {
         try {
             setLoading(true);
             const [posRes, psosRes] = await Promise.all([
-                api.get('/pos/'),  // Added trailing slash
-                api.get('/psos/')  // Added trailing slash
+                api.get('/pos/'),  
+                api.get('/psos/')  
             ]);
+            
+            // FIX: Safely extract data handling Django's paginated responses
+            const fetchedPos = posRes.data.results || posRes.data;
+            const fetchedPsos = psosRes.data.results || psosRes.data;
             
             // Sort by ID naturally (PO1, PO2, PO10...)
             const sortById = (a, b) => {
@@ -26,8 +30,10 @@ const OutcomesManagement = () => {
                 return numA - numB;
             };
 
-            setPos(posRes.data.sort(sortById));
-            setPsos(psosRes.data.sort(sortById));
+            // FIX: Ensure they are arrays before sorting
+            setPos(Array.isArray(fetchedPos) ? [...fetchedPos].sort(sortById) : []);
+            setPsos(Array.isArray(fetchedPsos) ? [...fetchedPsos].sort(sortById) : []);
+            
         } catch (error) {
             console.error("Failed to load outcomes", error);
         } finally {
@@ -47,7 +53,7 @@ const OutcomesManagement = () => {
                 id: `PO${nextNum}`, 
                 description: 'New Program Outcome' 
             };
-            await api.post('/pos/', newPo); // Added trailing slash
+            await api.post('/pos/', newPo); 
             fetchData();
         } catch (error) {
             console.error("Failed to add PO", error);
@@ -61,7 +67,7 @@ const OutcomesManagement = () => {
                 id: `PSO${nextNum}`, 
                 description: 'New Program Specific Outcome' 
             };
-            await api.post('/psos/', newPso); // Added trailing slash
+            await api.post('/psos/', newPso); 
             fetchData();
         } catch (error) {
             console.error("Failed to add PSO", error);
@@ -80,7 +86,6 @@ const OutcomesManagement = () => {
     const handleDescriptionBlur = async (id, newDescription, type) => {
         try {
             const endpoint = type === 'po' ? '/pos' : '/psos';
-            // Added trailing slash
             await api.patch(`${endpoint}/${id}/`, { description: newDescription });
         } catch (error) {
             console.error(`Failed to update ${type.toUpperCase()}`, error);
@@ -98,7 +103,6 @@ const OutcomesManagement = () => {
 
         try {
             const endpoint = type === 'po' ? '/pos' : '/psos';
-            // Added trailing slash
             await api.delete(`${endpoint}/${outcomeId}/`);
             
             fetchData();
@@ -114,7 +118,7 @@ const OutcomesManagement = () => {
             {/* Confirmation Modal */}
             {deleteConfirmation.isOpen && (
                 <ConfirmationModal 
-                    isOpen={deleteConfirmation.isOpen} // Ensure your modal accepts 'isOpen'
+                    isOpen={deleteConfirmation.isOpen} 
                     onConfirm={confirmDelete}
                     onCancel={() => setDeleteConfirmation({ isOpen: false, outcomeId: null, type: null })}
                     title={`Delete ${deleteConfirmation.type === 'po' ? 'Program Outcome' : 'PSO'}`}

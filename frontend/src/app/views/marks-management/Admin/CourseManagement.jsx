@@ -12,7 +12,7 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
         name: '', 
         semester: 1, 
         credits: 3,
-        scheme: '' // New Field
+        scheme: '' 
     });
 
     useEffect(() => {
@@ -22,7 +22,7 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                 name: course.name, 
                 semester: course.semester,
                 credits: course.credits,
-                scheme: course.scheme || '' // Handle existing courses without scheme
+                scheme: course.scheme || '' 
             });
         } else {
             // Set default scheme if available (defaults to the first one)
@@ -67,7 +67,7 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                                 onChange={e => setFormData({...formData, code: e.target.value.toUpperCase()})}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm font-mono uppercase"
                                 placeholder="e.g. 18CS51"
-                                disabled={!!course} // Disable code editing if editing existing course (as it is often the ID)
+                                disabled={!!course} // Disable code editing if editing existing course
                             />
                         </div>
                         <div>
@@ -97,7 +97,7 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                         />
                     </div>
 
-                    {/* Scheme Selection (NEW) */}
+                    {/* Scheme Selection */}
                     <div>
                         <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Academic Scheme <span className="text-red-500">*</span></label>
                         <select 
@@ -153,7 +153,7 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
 const CourseManagement = () => {
     const { user } = useAuth();
     const [courses, setCourses] = useState([]);
-    const [schemes, setSchemes] = useState([]); // Store schemes
+    const [schemes, setSchemes] = useState([]);
     const [loading, setLoading] = useState(true);
     
     // Modal State
@@ -167,12 +167,18 @@ const CourseManagement = () => {
         try {
             setLoading(true);
             const [coursesRes, schemesRes] = await Promise.all([
-                api.get(`/courses/?departmentId=${user.department}`),
+                // Fixed query param to use standard Django filter 'department='
+                api.get(`/courses/?department=${user.department}`),
                 api.get('/schemes/')
             ]);
             
-            setCourses(coursesRes.data);
-            setSchemes(schemesRes.data);
+            // FIX: Safely extract paginated results for both courses and schemes
+            const fetchedCourses = coursesRes.data.results || coursesRes.data;
+            const fetchedSchemes = schemesRes.data.results || schemesRes.data;
+
+            setCourses(Array.isArray(fetchedCourses) ? fetchedCourses : []);
+            setSchemes(Array.isArray(fetchedSchemes) ? fetchedSchemes : []);
+
         } catch (error) {
             console.error("Failed to fetch data", error);
         } finally {
@@ -186,7 +192,7 @@ const CourseManagement = () => {
 
     // Helpers
     const getSchemeName = (schemeId) => {
-        const s = schemes.find(sc => sc.id === schemeId);
+        const s = schemes.find(sc => String(sc.id) === String(schemeId));
         return s ? s.name : <span className="text-red-400 italic font-bold text-xs">Not Assigned</span>;
     };
 
@@ -208,8 +214,8 @@ const CourseManagement = () => {
     const handleSave = async (formData) => {
         const payload = {
             ...formData,
-            id: selectedCourse ? selectedCourse.id : formData.code, // Use Code as ID for new courses
-            department: user.department // Auto-assign Admin's Department
+            id: selectedCourse ? selectedCourse.id : formData.code, 
+            department: user.department 
         };
 
         try {

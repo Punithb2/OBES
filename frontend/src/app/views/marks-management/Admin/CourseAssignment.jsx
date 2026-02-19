@@ -13,8 +13,6 @@ const AssignmentModal = ({ isOpen, onClose, course, allFaculty, onSave }) => {
     useEffect(() => {
         if (course) {
             // Load existing assignments from course settings
-            // If settings.assigned_team exists, use it. 
-            // Fallback: If assigned_faculty (single) exists in DB, add it.
             let initialAssignments = [];
             
             if (course.settings?.assigned_team) {
@@ -35,7 +33,7 @@ const AssignmentModal = ({ isOpen, onClose, course, allFaculty, onSave }) => {
     const handleAdd = () => {
         if (!newFacultyId) return;
         
-        const isAlreadyAssigned = assignments.some(a => a.facultyId == newFacultyId); // Use loose equality for IDs
+        const isAlreadyAssigned = assignments.some(a => String(a.facultyId) === String(newFacultyId)); 
         if (isAlreadyAssigned) {
             alert("This faculty member is already assigned to this course.");
             return;
@@ -56,7 +54,7 @@ const AssignmentModal = ({ isOpen, onClose, course, allFaculty, onSave }) => {
     };
 
     const getFacultyName = (id) => {
-        const f = allFaculty.find(u => u.id == id);
+        const f = allFaculty.find(u => String(u.id) === String(id));
         return f ? (f.display_name || f.username) : 'Unknown';
     };
 
@@ -182,14 +180,24 @@ const CourseAssignment = () => {
 
             // 1. Fetch Faculty (Filtered by Dept)
             const facultyResponse = await api.get(`/users/?role=faculty&department=${deptId}`);
-            setFaculty(facultyResponse.data);
+            
+            // FIX: Safely extract paginated results
+            const fetchedFaculty = facultyResponse.data.results || facultyResponse.data;
+            setFaculty(Array.isArray(fetchedFaculty) ? fetchedFaculty : []);
 
-            // 2. Fetch Courses (Filtered by Dept)
-            const coursesResponse = await api.get(`/courses/?departmentId=${deptId}`);
-            const sortedCourses = coursesResponse.data.sort((a, b) => 
-                a.semester - b.semester || a.code.localeCompare(b.code)
-            );
+            // 2. Fetch Courses (Filtered by Dept) -> FIXED: departmentId to department
+            const coursesResponse = await api.get(`/courses/?department=${deptId}`);
+            
+            // FIX: Safely extract paginated results
+            const fetchedCourses = coursesResponse.data.results || coursesResponse.data;
+            
+            // FIX: Check if it's an array before sorting
+            const sortedCourses = Array.isArray(fetchedCourses) 
+                ? [...fetchedCourses].sort((a, b) => a.semester - b.semester || (a.code || '').localeCompare(b.code || ''))
+                : [];
+                
             setCourses(sortedCourses);
+            
         } catch (error) {
             console.error("Failed to load data", error);
         } finally {
@@ -201,7 +209,7 @@ const CourseAssignment = () => {
 
     const handleSaveAssignments = async (courseId, assignedTeam) => {
         try {
-            const courseToUpdate = courses.find(c => c.id === courseId);
+            const courseToUpdate = courses.find(c => String(c.id) === String(courseId));
             
             // Logic: Update the 'settings' JSON field
             const updatedSettings = {
@@ -210,7 +218,6 @@ const CourseAssignment = () => {
             };
 
             // Also update the main 'assigned_faculty' field with the first Coordinator/Lecturer found
-            // This ensures basic backward compatibility with Django's ForeignKey
             const primaryFaculty = assignedTeam.length > 0 ? assignedTeam[0].facultyId : null;
 
             await api.patch(`/courses/${courseId}/`, { 
@@ -220,7 +227,7 @@ const CourseAssignment = () => {
 
             // Update local state
             setCourses(prev => prev.map(c => 
-                c.id === courseId ? { ...c, settings: updatedSettings, assigned_faculty: primaryFaculty } : c
+                String(c.id) === String(courseId) ? { ...c, settings: updatedSettings, assigned_faculty: primaryFaculty } : c
             ));
             
             setModal({ isOpen: false, courseId: null });
@@ -231,12 +238,11 @@ const CourseAssignment = () => {
     };
 
     const getFacultyName = (id) => {
-        const f = faculty.find(u => u.id == id);
+        const f = faculty.find(u => String(u.id) === String(id));
         return f ? (f.display_name || f.username) : 'Unknown';
     };
 
     const renderAssignedFacultyCell = (course) => {
-        // Priority: Check JSON settings first, then DB field
         let assignments = course.settings?.assigned_team || [];
         
         if (assignments.length === 0 && course.assigned_faculty) {
@@ -269,7 +275,7 @@ const CourseAssignment = () => {
             <AssignmentModal 
                 isOpen={modal.isOpen} 
                 onClose={() => setModal({ isOpen: false, courseId: null })}
-                course={courses.find(c => c.id === modal.courseId)}
+                course={courses.find(c => String(c.id) === String(modal.courseId))}
                 allFaculty={faculty}
                 onSave={handleSaveAssignments}
             />

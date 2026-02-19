@@ -2,12 +2,21 @@ from rest_framework import viewsets, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.views import APIView
+from .calculation_services import calculate_course_attainment
+from .permissions import IsSuperAdmin, IsDepartmentAdmin, IsFacultyForCourse
 from .models import *
 from .serializers import *
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
+    
+    def get_permissions(self):
+        # ONLY Super Admins can create or edit Departments
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsSuperAdmin()]
+        # Anyone logged in can view the department list
+        return [permissions.IsAuthenticated()]
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -58,6 +67,12 @@ class UserViewSet(viewsets.ModelViewSet):
 class SchemeViewSet(viewsets.ModelViewSet):
     queryset = Scheme.objects.all()
     serializer_class = SchemeSerializer
+    
+    def get_permissions(self):
+        # ONLY Department Admins (and Super Admins) can create or edit Schemes
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsDepartmentAdmin()]
+        return [permissions.IsAuthenticated()]
 
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
@@ -88,6 +103,30 @@ class StudentViewSet(viewsets.ModelViewSet):
 class MarkViewSet(viewsets.ModelViewSet):
     queryset = Mark.objects.all()
     serializer_class = MarkSerializer
+    # Faculty can only edit marks for their courses
+    permission_classes = [permissions.IsAuthenticated, IsFacultyForCourse]
+
+    def get_queryset(self):
+        """
+        Filters data so Faculty only download marks for their own subjects.
+        """
+        queryset = Mark.objects.all()
+        user = self.request.user
+        
+        # Security Filtration
+        if user.role == 'faculty':
+            queryset = queryset.filter(course__assigned_faculty=user)
+        elif user.role == 'student':
+            queryset = queryset.filter(student__usn=user.username)
+        elif user.role == 'admin':
+            queryset = queryset.filter(course__department=user.department)
+
+        # Performance Filtration (URL Params)
+        course_id = self.request.query_params.get('course')
+        if course_id:
+            queryset = queryset.filter(course_id=course_id)
+            
+        return queryset
 
 class ProgramOutcomeViewSet(viewsets.ModelViewSet):
     queryset = ProgramOutcome.objects.all()
@@ -119,3 +158,18 @@ class SurveyViewSet(viewsets.ModelViewSet):
         if dept_id:
             queryset = queryset.filter(department=dept_id)
         return queryset
+
+class CourseAttainmentReportView(APIView):
+    # We will add strict permissions here in Phase 3!
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, course_id):
+        """
+        Generates and returns the full CO/PO attainment report for a course.
+        """
+        report_data = calculate_course_attainment(course_id)
+        
+        if "error" in report_data:
+            return Response(report_data, status=404)
+            
+        return Response(report_data, status=200)

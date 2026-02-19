@@ -12,10 +12,11 @@ const EvaluationResultPage = () => {
     const [courses, setCourses] = useState([]);
     const [schemes, setSchemes] = useState([]);
     const [outcomes, setOutcomes] = useState([]);
-    const [allStudents, setAllStudents] = useState([]);
-    const [allMarks, setAllMarks] = useState([]);
     const [matrix, setMatrix] = useState({});
     const [surveyData, setSurveyData] = useState({ exit_survey: {}, employer_survey: {}, alumni_survey: {} });
+    
+    // NEW: Store backend-calculated CO reports for each course
+    const [courseReports, setCourseReports] = useState({});
     
     // UI State
     const [selectedSchemeId, setSelectedSchemeId] = useState('');
@@ -29,49 +30,67 @@ const EvaluationResultPage = () => {
                 setLoading(true);
                 const deptId = user.department;
 
-                const [coursesRes, schemesRes, studentsRes, marksRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
-                    api.get(`/courses/?departmentId=${deptId}`),
-                    api.get('/schemes/'), // Fetch all schemes
-                    api.get('/students/'),
-                    api.get('/marks/'),
+                // A. Fetch Base Configuration Data (Notice: We removed /students/ and /marks/!)
+                const [coursesRes, schemesRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
+                    api.get(`/courses/?department=${deptId}`),
+                    api.get('/schemes/'), 
                     api.get('/pos/'),
                     api.get('/psos/'),
-                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: [] })),
-                    api.get(`/surveys/?department=${deptId}`).catch(() => ({ data: [] })) 
+                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: { results: [] } })),
+                    api.get(`/surveys/?department=${deptId}`).catch(() => ({ data: { results: [] } })) 
                 ]);
 
-                // Sort Outcomes
+                // Safely extract paginated responses
+                const safeCourses = coursesRes.data.results || coursesRes.data || [];
+                const safeSchemes = schemesRes.data.results || schemesRes.data || [];
+                const safePos = posRes.data.results || posRes.data || [];
+                const safePsos = psosRes.data.results || psosRes.data || [];
+                const safeMatrix = matrixRes.data.results || matrixRes.data || [];
+                const safeSurveys = surveyRes.data.results || surveyRes.data || [];
+
+                // Sort Outcomes numerically
                 const sortById = (a, b) => {
-                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
-                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    const numA = parseInt((a.id || '').match(/\d+/)?.[0] || 0);
+                    const numB = parseInt((b.id || '').match(/\d+/)?.[0] || 0);
                     return numA - numB;
                 };
 
-                setCourses(coursesRes.data);
-                setSchemes(schemesRes.data);
-                
-                // Default to the first available scheme for summary calculation
-                if (schemesRes.data.length > 0) {
-                    setSelectedSchemeId(schemesRes.data[0].id);
-                }
+                const sortedPos = Array.isArray(safePos) ? [...safePos].sort(sortById) : [];
+                const sortedPsos = Array.isArray(safePsos) ? [...safePsos].sort(sortById) : [];
 
-                setAllStudents(studentsRes.data);
-                setAllMarks(marksRes.data);
-                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
+                setCourses(safeCourses);
+                setSchemes(safeSchemes);
+                setOutcomes([...sortedPos, ...sortedPsos]);
 
-                if (surveyRes.data && surveyRes.data.length > 0) {
-                    setSurveyData(surveyRes.data[0]);
-                }
+                if (safeSchemes.length > 0) setSelectedSchemeId(safeSchemes[0].id);
+                if (safeSurveys.length > 0) setSurveyData(safeSurveys[0]);
 
-                // Process Matrix
+                // Process Articulation Matrix
                 const mBuilder = {};
-                const matrixData = Array.isArray(matrixRes.data) ? matrixRes.data : [];
-                matrixData.forEach(item => {
-                    if (item.course && item.matrix) {
-                        mBuilder[item.course] = item.matrix;
-                    }
+                safeMatrix.forEach(item => {
+                    if (item.course && item.matrix) mBuilder[item.course] = item.matrix;
                 });
                 setMatrix(mBuilder);
+
+                // B. DYNAMICALLY FETCH PRE-CALCULATED REPORTS FOR ALL COURSES
+                const reportsMap = {};
+                const reportPromises = safeCourses.map(course => 
+                    api.get(`/reports/course-attainment/${course.id}/`).catch(() => null)
+                );
+                
+                const reports = await Promise.all(reportPromises);
+                
+                safeCourses.forEach((course, index) => {
+                    const res = reports[index];
+                    // Save the 'co_attainment' array (which contains direct, indirect, and final score_index)
+                    if (res && res.data && res.data.co_attainment) {
+                        reportsMap[course.id] = res.data.co_attainment;
+                    } else {
+                        reportsMap[course.id] = [];
+                    }
+                });
+                
+                setCourseReports(reportsMap);
 
             } catch (error) {
                 console.error("Failed to load evaluation data", error);
@@ -82,99 +101,34 @@ const EvaluationResultPage = () => {
         fetchData();
     }, [user]);
 
-    // --- 2. CALCULATION ENGINE ---
+    // --- 2. STREAMLINED CALCULATION ENGINE ---
     const calculateData = useMemo(() => {
         if (!courses.length || !outcomes.length) return { courseRows: [], summaryRows: [] };
 
-        const getCourseAttainment = (course) => {
-            const courseStudents = allStudents.filter(s => s.courses && s.courses.includes(course.id));
-            const courseMarks = allMarks.filter(m => m.course === course.id);
+        // 1. Map Course COs to POs using the Backend Report
+        const courseRows = courses.map(course => {
+            const coData = courseReports[course.id] || [];
             const courseMatrix = matrix[course.id] || {};
-
-            if (courseStudents.length === 0 || courseMarks.length === 0) return {};
-
-            // --- DYNAMIC: Get Rules from Course's Scheme ---
-            const settings = course.scheme_details?.settings || {};
-            const rules = settings.attainment_rules || {};
-            
-            // 1. Thresholds
-            const targetLevel = rules.studentPassThreshold || 50; // Default 50%
-            const lThresholds = rules.levelThresholds || { level3: 70, level2: 60, level1: 50 };
-            const thresholds = [
-                { threshold: lThresholds.level3, level: 3 },
-                { threshold: lThresholds.level2, level: 2 },
-                { threshold: lThresholds.level1, level: 1 },
-                { threshold: 0, level: 0 }
-            ];
-
-            // 2. Weightage (Direct vs Indirect for Course)
-            const wDirect = (rules.finalWeightage?.direct || 80) / 100;
-            const wIndirect = (rules.finalWeightage?.indirect || 20) / 100;
-
-            const tools = course.assessment_tools || [];
-            const seeTool = tools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE' || t.name === 'Semester End Exam');
-            const internalTools = tools.filter(t => t !== seeTool && t.type !== 'Improvement Test');
-            
-            // A. Calculate SEE Level
-            let seePassedCount = 0;
-            if (seeTool) {
-                courseStudents.forEach(student => {
-                    const record = courseMarks.find(m => m.student === student.id && (m.assessment_name === seeTool.name || m.assessment_name === 'SEE'));
-                    if (record && record.scores) {
-                        const score = Object.values(record.scores).reduce((a, b) => a + (parseInt(b)||0), 0);
-                        if (score >= (seeTool.maxMarks * targetLevel / 100)) seePassedCount++;
-                    }
-                });
-            }
-            const seePercent = (seePassedCount / (courseStudents.length || 1)) * 100;
-            const seeLevel = thresholds.find(t => seePercent >= t.threshold)?.level || 0;
-
-            // B. Calculate CO Levels
-            const coLevels = {};
-            (course.cos || []).forEach(co => {
-                let coTotal = 0, coPassed = 0;
-                internalTools.forEach(tool => {
-                    if (tool.coDistribution?.[co.id]) {
-                        courseStudents.forEach(student => {
-                            const record = courseMarks.find(m => m.student === student.id && m.assessment_name === tool.name);
-                            const score = parseInt(record?.scores?.[co.id] || 0);
-                            coTotal++;
-                            if (score >= (parseInt(tool.coDistribution[co.id]) * targetLevel / 100)) coPassed++;
-                        });
-                    }
-                });
-                const cieLevel = thresholds.find(t => ((coTotal > 0 ? (coPassed/coTotal)*100 : 0) >= t.threshold))?.level || 0;
-                
-                // Course Internal Attainment Split
-                const indirectVal = parseFloat(course.settings?.indirect_attainment?.[co.id] || 3);
-                const directVal = (cieLevel + seeLevel) / 2;
-                
-                // DYNAMIC SPLIT APPLIED HERE
-                coLevels[co.id] = (wDirect * directVal) + (wIndirect * indirectVal);
-            });
-
-            // C. Map to POs
             const poAttainment = {};
+
+            // Multiply Backend Final Score Index by Articulation Matrix Mapping
             outcomes.forEach(outcome => {
                 let wSum = 0, wCount = 0;
-                (course.cos || []).forEach(co => {
-                    const mapVal = parseFloat(courseMatrix[co.id]?.[outcome.id]);
+                coData.forEach(coItem => {
+                    const mapVal = parseFloat(courseMatrix[coItem.co]?.[outcome.id]);
                     if (!isNaN(mapVal)) {
-                        wSum += (mapVal * (coLevels[co.id] || 0)) / 3;
+                        // Formula: (Mapping Value * Backend CO Attainment) / 3
+                        wSum += (mapVal * coItem.score_index) / 3;
                         wCount++;
                     }
                 });
                 if (wCount > 0) poAttainment[outcome.id] = wSum / wCount;
             });
 
-            return poAttainment;
-        };
+            return { course, attainment: poAttainment };
+        }).sort((a, b) => (a.course.code || '').localeCompare(b.course.code || ''));
 
-        const courseRows = courses.map(course => ({
-            course,
-            attainment: getCourseAttainment(course)
-        })).sort((a, b) => a.course.code.localeCompare(b.course.code));
-
+        // 2. Average PO Attainment across all courses
         const directAttainment = {};
         outcomes.forEach(outcome => {
             let sum = 0, count = 0;
@@ -187,7 +141,7 @@ const EvaluationResultPage = () => {
             if (count > 0) directAttainment[outcome.id] = sum / count;
         });
 
-        // --- C. Extract Survey Data ---
+        // 3. Extract Survey Data (Indirect)
         const exitData = surveyData.exit_survey || {};
         const employerData = surveyData.employer_survey || {};
         const alumniData = surveyData.alumni_survey || {};
@@ -204,8 +158,8 @@ const EvaluationResultPage = () => {
             indirectAttainment[outcome.id] = divisor > 0 ? total / divisor : 0;
         });
 
-        // --- D. Final Program Weightage (Based on Selected Reference Scheme) ---
-        const refScheme = schemes.find(s => s.id === selectedSchemeId);
+        // 4. Final Program Weightage (Based on Selected Reference Scheme)
+        const refScheme = schemes.find(s => String(s.id) === String(selectedSchemeId));
         const refRules = refScheme?.settings?.attainment_rules || {};
         const wDirectProgram = (refRules.finalWeightage?.direct || 80) / 100;
         const wIndirectProgram = (refRules.finalWeightage?.indirect || 20) / 100;
@@ -231,11 +185,11 @@ const EvaluationResultPage = () => {
             { label: 'Alumni Survey', data: alumniData },
             { label: 'Indirect Attainment (Avg of Surveys) [B]', data: indirectAttainment, bold: true, bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
             { 
-                label: `weighted Direct [C = A * ${(wDirectProgram * 100).toFixed(0)}%]`, 
+                label: `Weighted Direct [C = A * ${(wDirectProgram * 100).toFixed(0)}%]`, 
                 data: rowC 
             },
             { 
-                label: `weighted Indirect [D = B * ${(wIndirectProgram * 100).toFixed(0)}%]`, 
+                label: `Weighted Indirect [D = B * ${(wIndirectProgram * 100).toFixed(0)}%]`, 
                 data: rowD 
             },
             { label: 'Total Attainment [C + D]', data: totalRow, bold: true, bg: 'bg-green-50 dark:bg-green-900/20' },
@@ -243,7 +197,7 @@ const EvaluationResultPage = () => {
 
         return { courseRows, summaryRows };
 
-    }, [courses, outcomes, allStudents, allMarks, matrix, surveyData, schemes, selectedSchemeId]);
+    }, [courses, outcomes, matrix, surveyData, schemes, selectedSchemeId, courseReports]);
 
 
     if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
@@ -268,6 +222,7 @@ const EvaluationResultPage = () => {
                         className="text-sm font-bold border-none focus:ring-0 cursor-pointer bg-transparent text-primary-700 dark:text-primary-400"
                     >
                         {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        {schemes.length === 0 && <option value="">No Schemes Available</option>}
                     </select>
                 </div>
             </div>
@@ -318,7 +273,7 @@ const EvaluationResultPage = () => {
                                         {outcomes.map(outcome => {
                                             const val = row.data[outcome.id];
                                             let display = '-';
-                                            if (val !== undefined && val !== null) {
+                                            if (val !== undefined && val !== null && !isNaN(val)) {
                                                 display = typeof val === 'number' ? val.toFixed(2) : parseFloat(val).toFixed(2);
                                             }
                                             

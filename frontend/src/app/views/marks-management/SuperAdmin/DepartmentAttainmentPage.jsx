@@ -15,10 +15,11 @@ const DepartmentAttainmentPage = () => {
     const [courses, setCourses] = useState([]);
     const [schemes, setSchemes] = useState([]);
     const [outcomes, setOutcomes] = useState([]);
-    const [allStudents, setAllStudents] = useState([]);
-    const [allMarks, setAllMarks] = useState([]);
     const [matrix, setMatrix] = useState({});
     const [surveyData, setSurveyData] = useState({ exit_survey: {}, employer_survey: {}, alumni_survey: {} });
+    
+    // Store backend-calculated CO reports for each course
+    const [courseReports, setCourseReports] = useState({});
 
     // --- 1. INITIAL LOAD (Departments & Schemes) ---
     useEffect(() => {
@@ -28,12 +29,17 @@ const DepartmentAttainmentPage = () => {
                     api.get('/departments/'),
                     api.get('/schemes/')
                 ]);
-                setDepartments(deptRes.data);
-                setSchemes(schemesRes.data);
+                
+                // Safely handle paginated responses
+                const fetchedDepts = deptRes.data.results || deptRes.data || [];
+                const fetchedSchemes = schemesRes.data.results || schemesRes.data || [];
+
+                setDepartments(Array.isArray(fetchedDepts) ? fetchedDepts : []);
+                setSchemes(Array.isArray(fetchedSchemes) ? fetchedSchemes : []);
                 
                 // Default to first scheme for summary logic
-                if (schemesRes.data.length > 0) {
-                    setSelectedSchemeId(schemesRes.data[0].id);
+                if (Array.isArray(fetchedSchemes) && fetchedSchemes.length > 0) {
+                    setSelectedSchemeId(fetchedSchemes[0].id);
                 }
             } catch (error) {
                 console.error("Failed to load initial data", error);
@@ -49,43 +55,71 @@ const DepartmentAttainmentPage = () => {
         const fetchDeptData = async () => {
             setLoading(true);
             try {
-                const [coursesRes, studentsRes, marksRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
-                    api.get(`/courses/?departmentId=${selectedDeptId}`),
-                    api.get('/students/'), // Ideally filter by dept on backend
-                    api.get('/marks/'),    // Ideally filter by dept on backend
+                // Fetch Configuration Data
+                const [coursesRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
+                    api.get(`/courses/?department=${selectedDeptId}`),
                     api.get('/pos/'),
                     api.get('/psos/'),
-                    api.get(`/articulation-matrix/?department=${selectedDeptId}`).catch(() => ({ data: [] })),
-                    api.get(`/surveys/?department=${selectedDeptId}`).catch(() => ({ data: [] }))
+                    api.get(`/articulation-matrix/?department=${selectedDeptId}`).catch(() => ({ data: { results: [] } })),
+                    api.get(`/surveys/?department=${selectedDeptId}`).catch(() => ({ data: { results: [] } }))
                 ]);
+
+                // Safely extract paginated results
+                const fetchedCourses = coursesRes.data.results || coursesRes.data || [];
+                const fetchedPos = posRes.data.results || posRes.data || [];
+                const fetchedPsos = psosRes.data.results || psosRes.data || [];
+                const fetchedMatrix = matrixRes.data.results || matrixRes.data || [];
+                const fetchedSurveys = surveyRes.data.results || surveyRes.data || [];
 
                 // Sort Outcomes
                 const sortById = (a, b) => {
-                    const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
-                    const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
+                    const numA = parseInt((a.id || '').match(/\d+/)?.[0] || 0);
+                    const numB = parseInt((b.id || '').match(/\d+/)?.[0] || 0);
                     return numA - numB;
                 };
 
-                setCourses(coursesRes.data);
-                setAllStudents(studentsRes.data);
-                setAllMarks(marksRes.data);
-                setOutcomes([...posRes.data.sort(sortById), ...psosRes.data.sort(sortById)]);
+                const safePos = Array.isArray(fetchedPos) ? [...fetchedPos].sort(sortById) : [];
+                const safePsos = Array.isArray(fetchedPsos) ? [...fetchedPsos].sort(sortById) : [];
+                const safeCourses = Array.isArray(fetchedCourses) ? fetchedCourses : [];
 
-                if (surveyRes.data && surveyRes.data.length > 0) {
-                    setSurveyData(surveyRes.data[0]);
+                setCourses(safeCourses);
+                setOutcomes([...safePos, ...safePsos]);
+
+                if (Array.isArray(fetchedSurveys) && fetchedSurveys.length > 0) {
+                    setSurveyData(fetchedSurveys[0]);
                 } else {
                     setSurveyData({ exit_survey: {}, employer_survey: {}, alumni_survey: {} });
                 }
 
                 // Process Matrix
                 const mBuilder = {};
-                const matrixData = Array.isArray(matrixRes.data) ? matrixRes.data : [];
-                matrixData.forEach(item => {
-                    if (item.course && item.matrix) {
-                        mBuilder[item.course] = item.matrix;
+                if (Array.isArray(fetchedMatrix)) {
+                    fetchedMatrix.forEach(item => {
+                        if (item.course && item.matrix) {
+                            mBuilder[item.course] = item.matrix;
+                        }
+                    });
+                }
+                setMatrix(mBuilder);
+
+                // Fetch Pre-calculated Backend Reports for the selected department's courses
+                const reportsMap = {};
+                const reportPromises = safeCourses.map(course => 
+                    api.get(`/reports/course-attainment/${course.id}/`).catch(() => null)
+                );
+                
+                const reports = await Promise.all(reportPromises);
+                
+                safeCourses.forEach((course, index) => {
+                    const res = reports[index];
+                    if (res?.data?.co_attainment) {
+                        reportsMap[course.id] = res.data.co_attainment;
+                    } else {
+                        reportsMap[course.id] = [];
                     }
                 });
-                setMatrix(mBuilder);
+                
+                setCourseReports(reportsMap);
 
             } catch (error) {
                 console.error("Failed to load department data", error);
@@ -97,98 +131,33 @@ const DepartmentAttainmentPage = () => {
         fetchDeptData();
     }, [selectedDeptId]);
 
-    // --- 3. CALCULATION ENGINE (Identical to Admin Page) ---
+    // --- 3. STREAMLINED CALCULATION ENGINE ---
     const calculateData = useMemo(() => {
         if (!selectedDeptId || !courses.length || !outcomes.length) return { courseRows: [], summaryRows: [] };
 
-        const getCourseAttainment = (course) => {
-            const courseStudents = allStudents.filter(s => s.courses && s.courses.includes(course.id));
-            const courseMarks = allMarks.filter(m => m.course === course.id);
+        // 1. Map Course COs to POs using the Backend Report
+        const courseRows = courses.map(course => {
+            const coData = courseReports[course.id] || [];
             const courseMatrix = matrix[course.id] || {};
-
-            if (courseStudents.length === 0 || courseMarks.length === 0) return {};
-
-            // --- DYNAMIC RULES FROM COURSE SCHEME ---
-            const settings = course.scheme_details?.settings || {};
-            const rules = settings.attainment_rules || {};
-            
-            // 1. Thresholds
-            const lThresholds = rules.levelThresholds || { level3: 70, level2: 60, level1: 50 };
-            const thresholds = [
-                { threshold: parseFloat(lThresholds.level3), level: 3 },
-                { threshold: parseFloat(lThresholds.level2), level: 2 },
-                { threshold: parseFloat(lThresholds.level1), level: 1 },
-                { threshold: 0, level: 0 }
-            ];
-            
-            const targetLevel = rules.studentPassThreshold !== undefined ? parseFloat(rules.studentPassThreshold) : 50;
-
-            // 2. Weights
-            const wDirect = (rules.finalWeightage?.direct || 80) / 100;
-            const wIndirect = (rules.finalWeightage?.indirect || 20) / 100;
-
-            const tools = course.assessment_tools || [];
-            const seeTool = tools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE' || t.name === 'Semester End Exam');
-            const internalTools = tools.filter(t => t !== seeTool && t.type !== 'Improvement Test');
-            
-            // A. SEE Calculation
-            let seePassedCount = 0;
-            if (seeTool) {
-                courseStudents.forEach(student => {
-                    const record = courseMarks.find(m => m.student === student.id && (m.assessment_name === seeTool.name || m.assessment_name === 'SEE'));
-                    if (record && record.scores) {
-                        const score = Object.values(record.scores).reduce((a, b) => a + (parseInt(b)||0), 0);
-                        if (score >= (seeTool.maxMarks * targetLevel / 100)) seePassedCount++;
-                    }
-                });
-            }
-            const seePercent = (seePassedCount / (courseStudents.length || 1)) * 100;
-            const seeLevel = thresholds.find(t => seePercent >= t.threshold)?.level || 0;
-
-            // B. CIE Calculation
-            const coLevels = {};
-            (course.cos || []).forEach(co => {
-                let coTotal = 0, coPassed = 0;
-                internalTools.forEach(tool => {
-                    if (tool.coDistribution?.[co.id]) {
-                        courseStudents.forEach(student => {
-                            const record = courseMarks.find(m => m.student === student.id && m.assessment_name === tool.name);
-                            const score = parseInt(record?.scores?.[co.id] || 0);
-                            coTotal++;
-                            if (score >= (parseInt(tool.coDistribution[co.id]) * targetLevel / 100)) coPassed++;
-                        });
-                    }
-                });
-                const cieLevel = thresholds.find(t => ((coTotal > 0 ? (coPassed/coTotal)*100 : 0) >= t.threshold))?.level || 0;
-                
-                const indirectVal = parseFloat(course.settings?.indirect_attainment?.[co.id] || 3);
-                const directVal = (cieLevel + seeLevel) / 2;
-                
-                coLevels[co.id] = (wDirect * directVal) + (wIndirect * indirectVal);
-            });
-
-            // C. PO Mapping
             const poAttainment = {};
+
+            // Multiply Backend Final Score Index by Articulation Matrix Mapping
             outcomes.forEach(outcome => {
                 let wSum = 0, wCount = 0;
-                (course.cos || []).forEach(co => {
-                    const mapVal = parseFloat(courseMatrix[co.id]?.[outcome.id]);
+                coData.forEach(coItem => {
+                    const mapVal = parseFloat(courseMatrix[coItem.co]?.[outcome.id]);
                     if (!isNaN(mapVal)) {
-                        wSum += (mapVal * (coLevels[co.id] || 0)) / 3;
+                        wSum += (mapVal * coItem.score_index) / 3;
                         wCount++;
                     }
                 });
                 if (wCount > 0) poAttainment[outcome.id] = wSum / wCount;
             });
 
-            return poAttainment;
-        };
+            return { course, attainment: poAttainment };
+        }).sort((a, b) => (a.course.code || '').localeCompare(b.course.code || ''));
 
-        const courseRows = courses.map(course => ({
-            course,
-            attainment: getCourseAttainment(course)
-        })).sort((a, b) => a.course.code.localeCompare(b.course.code));
-
+        // 2. Average PO Attainment across all courses
         const directAttainment = {};
         outcomes.forEach(outcome => {
             let sum = 0, count = 0;
@@ -201,7 +170,7 @@ const DepartmentAttainmentPage = () => {
             if (count > 0) directAttainment[outcome.id] = sum / count;
         });
 
-        // Surveys
+        // 3. Extract Survey Data (Indirect)
         const exitData = surveyData.exit_survey || {};
         const employerData = surveyData.employer_survey || {};
         const alumniData = surveyData.alumni_survey || {};
@@ -218,8 +187,8 @@ const DepartmentAttainmentPage = () => {
             indirectAttainment[outcome.id] = divisor > 0 ? total / divisor : 0;
         });
 
-        // Final Summary based on REFERENCE SCHEME
-        const refScheme = schemes.find(s => s.id === selectedSchemeId);
+        // 4. Final Summary based on REFERENCE SCHEME
+        const refScheme = schemes.find(s => String(s.id) === String(selectedSchemeId));
         const refRules = refScheme?.settings?.attainment_rules || {};
         const wDirectProgram = (refRules.finalWeightage?.direct || 80) / 100;
         const wIndirectProgram = (refRules.finalWeightage?.indirect || 20) / 100;
@@ -257,7 +226,7 @@ const DepartmentAttainmentPage = () => {
 
         return { courseRows, summaryRows };
 
-    }, [selectedDeptId, courses, outcomes, allStudents, allMarks, matrix, surveyData, schemes, selectedSchemeId]);
+    }, [selectedDeptId, courses, outcomes, matrix, surveyData, schemes, selectedSchemeId, courseReports]);
 
     return (
         <div className="space-y-6 p-6">
@@ -362,7 +331,7 @@ const DepartmentAttainmentPage = () => {
                                             {outcomes.map(outcome => {
                                                 const val = row.data[outcome.id];
                                                 let display = '-';
-                                                if (val !== undefined && val !== null) {
+                                                if (val !== undefined && val !== null && !isNaN(val)) {
                                                     display = typeof val === 'number' ? val.toFixed(2) : parseFloat(val).toFixed(2);
                                                 }
                                                 return (

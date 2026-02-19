@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
 import { Loader2, AlertCircle } from 'lucide-react';
@@ -8,92 +8,99 @@ const CoPoAttainmentPage = () => {
     const { user } = useAuth();
     const [loading, setLoading] = useState(true);
 
-    // --- DATA STATES ---
+    // --- GLOBAL STATES ---
     const [courses, setCourses] = useState([]);
-    const [allStudents, setAllStudents] = useState([]);
-    const [allMarks, setAllMarks] = useState([]);
     const [pos, setPos] = useState([]);
     const [psos, setPsos] = useState([]);
-    const [matrixMap, setMatrixMap] = useState({});
-
+    
+    // --- LOCALIZED COURSE STATES ---
     const [selectedCourseId, setSelectedCourseId] = useState('');
+    const [courseStudents, setCourseStudents] = useState([]);
+    const [courseMarks, setCourseMarks] = useState([]);
+    const [courseMatrix, setCourseMatrix] = useState({});
+    const [reportData, setReportData] = useState(null); // Data from new Python Backend
 
-    // --- 1. FETCH ALL REQUIRED DATA ---
+    // --- 1. INITIAL LOAD (Fetch base structure) ---
     useEffect(() => {
-        const fetchAllData = async () => {
+        const fetchBaseData = async () => {
             if (!user) return;
-            setLoading(true);
             try {
-                const [coursesRes, studentsRes, marksRes, posRes, psosRes, matrixRes] = await Promise.all([
+                const [coursesRes, posRes, psosRes] = await Promise.all([
                     api.get('/courses/'),
-                    api.get('/students/'),
-                    api.get('/marks/'),
                     api.get('/pos/'),
-                    api.get('/psos/'),
-                    api.get('/articulation-matrix/')
+                    api.get('/psos/')
                 ]);
 
-                setCourses(coursesRes.data);
-                setAllStudents(studentsRes.data);
-                setAllMarks(marksRes.data);
+                const fetchedCourses = coursesRes.data.results || coursesRes.data;
+                const fetchedPos = posRes.data.results || posRes.data;
+                const fetchedPsos = psosRes.data.results || psosRes.data;
+
+                const assigned = fetchedCourses.filter(c => String(c.assigned_faculty) === String(user.id));
+                setCourses(assigned);
                 
+                if (assigned.length > 0) setSelectedCourseId(assigned[0].id);
+
                 const sortById = (a, b) => {
                     const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
                     const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
                     return numA - numB;
                 };
-                setPos(posRes.data.sort(sortById));
-                setPsos(psosRes.data.sort(sortById));
+                setPos(fetchedPos.sort(sortById));
+                setPsos(fetchedPsos.sort(sortById));
+            } catch (error) {
+                console.error("Failed to fetch base data", error);
+            }
+        };
+        fetchBaseData();
+    }, [user]);
 
-                const mBuilder = {};
-                const matrixData = Array.isArray(matrixRes.data) ? matrixRes.data : []; 
-                matrixData.forEach(item => {
-                    if (item.course && item.matrix) {
-                        mBuilder[item.course] = item.matrix;
-                    }
-                });
-                setMatrixMap(mBuilder);
+    const selectedCourse = useMemo(() => courses.find(c => c.id === selectedCourseId), [courses, selectedCourseId]);
+
+    // --- 2. FETCH SPECIFIC COURSE DATA (The "Slim-Down" Optimization) ---
+    useEffect(() => {
+        const fetchCourseData = async () => {
+            if (!selectedCourseId) return;
+            setLoading(true);
+            setReportData(null);
+            
+            try {
+                // Fetch filtered marks and backend calculations simultaneously
+                const [studentsRes, marksRes, matrixRes, reportRes] = await Promise.all([
+                    api.get('/students/'),
+                    api.get(`/marks/?course=${selectedCourseId}`), // Strict Filtering
+                    api.get('/articulation-matrix/'),
+                    api.get(`/reports/course-attainment/${selectedCourseId}/`) // The Python Engine
+                ]);
+
+                const allStudents = studentsRes.data.results || studentsRes.data;
+                setCourseStudents(allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId)));
+                
+                setCourseMarks(marksRes.data.results || marksRes.data);
+                
+                const allMatrices = matrixRes.data.results || matrixRes.data;
+                const specificMatrix = allMatrices.find(m => m.course === selectedCourseId);
+                setCourseMatrix(specificMatrix ? specificMatrix.matrix : {});
+
+                setReportData(reportRes.data);
 
             } catch (error) {
-                console.error("Failed to fetch attainment data", error);
+                console.error("Failed to fetch course data", error);
             } finally {
                 setLoading(false);
             }
         };
-
-        fetchAllData();
-    }, [user]);
-
-    // --- 2. FILTER & SELECT COURSE ---
-    const assignedCourses = useMemo(() => {
-        if (!user || !courses.length) return [];
-        return courses.filter(c => String(c.assigned_faculty) === String(user.id));
-    }, [user, courses]);
-
-    useEffect(() => {
-        if (assignedCourses.length > 0 && !assignedCourses.some(c => c.id === selectedCourseId)) {
-            setSelectedCourseId(assignedCourses[0].id);
-        } else if (assignedCourses.length === 0) {
-            setSelectedCourseId('');
-        }
-    }, [assignedCourses]);
-
-    const selectedCourse = useMemo(() => 
-        courses.find(c => c.id === selectedCourseId), 
-    [courses, selectedCourseId]);
+        fetchCourseData();
+    }, [selectedCourseId]);
 
     // --- 3. BUILD DYNAMIC CONFIG FROM SCHEME ---
     const courseConfig = useMemo(() => {
         if (!selectedCourse) return null;
 
         const settings = selectedCourse.scheme_details?.settings || {};
-        const rules = settings.attainment_rules || {}; 
+        // Fallback to Phase 1 JSON schema standard
+        const rules = settings.attainment_rules || settings; 
 
-        let levelsDict = rules.levelThresholds;
-        if (!levelsDict || Object.keys(levelsDict).length === 0) {
-            levelsDict = { level3: 70, level2: 60, level1: 50 };
-        }
-
+        let levelsDict = rules.attainment_levels || rules.levelThresholds || { level_3: 70, level_2: 60, level_1: 50 };
         const sortedLevels = Object.entries(levelsDict)
             .map(([key, val]) => ({
                 level: parseInt(key.replace(/\D/g, '')) || 0, 
@@ -101,8 +108,8 @@ const CoPoAttainmentPage = () => {
             }))
             .sort((a, b) => b.threshold - a.threshold);
 
-        const targetLevel = rules.studentPassThreshold !== undefined ? parseFloat(rules.studentPassThreshold) : 50;
-        const weightage = rules.finalWeightage || { direct: 80, indirect: 20 };
+        const targetLevel = rules.pass_criteria || rules.studentPassThreshold || 50;
+        const weightage = rules.weightage || rules.finalWeightage || { direct: 80, indirect: 20 };
 
         const rawTools = selectedCourse.assessment_tools || [];
         const seeTool = rawTools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE' || t.name === 'Semester End Exam');
@@ -110,28 +117,14 @@ const CoPoAttainmentPage = () => {
         
         const processTool = (tool) => {
             let parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
-                co: coId,
-                max: parseInt(max) || 0
+                co: coId, max: parseInt(max) || 0
             }));
-
             if (parts.length === 0) {
-                const allCourseCos = selectedCourse.cos || [];
-                parts = allCourseCos.map(co => ({
-                    co: co.id,
-                    max: tool.maxMarks 
-                }));
+                parts = (selectedCourse.cos || []).map(co => ({ co: co.id, max: tool.maxMarks }));
             }
-
-            const colSpan = (parts.length * 3) + 1; 
-            
             return {
-                id: tool.name, 
-                title: tool.name,
-                type: tool.type,
-                total: tool.maxMarks || 0,
-                scaleTo: tool.weightage || 0,
-                parts: parts,
-                colSpan: colSpan
+                id: tool.name, title: tool.name, type: tool.type,
+                total: tool.maxMarks || 0, parts: parts, colSpan: (parts.length * 3) + 1
             };
         };
 
@@ -148,48 +141,29 @@ const CoPoAttainmentPage = () => {
 
         Object.keys(buckets).sort().forEach(key => {
             const groupTools = buckets[key].map(processTool);
-            groupTools.sort((a, b) => (a.type.includes('Internal') ? -1 : 1));
             processedToolsFlat.push(...groupTools);
-
-            const groupMax = groupTools.reduce((sum, t) => sum + t.total, 0);
-
             groupedTools.push({
                 id: `group-${key}`,
                 title: key === 'Other' ? 'Other Assessments' : `Internal Assessment ${key}`,
                 tools: groupTools,
-                groupMax: groupMax,
+                groupMax: groupTools.reduce((sum, t) => sum + t.total, 0),
                 totalColSpan: groupTools.reduce((sum, t) => sum + t.colSpan, 0)
             });
         });
 
-        const seeDistributionKeys = seeTool?.coDistribution ? Object.keys(seeTool.coDistribution) : [];
-        const seeCoMap = seeDistributionKeys.length > 0 
-            ? seeDistributionKeys 
-            : (selectedCourse.cos || []).map(c => c.id);
-
-        const seeConfig = {
-            total: seeTool?.maxMarks || 100,
-            scaleTo: seeTool?.weightage || 0,
-            coMap: seeCoMap,
-            colSpan: 3 
-        };
+        const seeCoMap = seeTool?.coDistribution ? Object.keys(seeTool.coDistribution) : (selectedCourse.cos || []).map(c => c.id);
 
         return {
-            targetLevel,
-            sortedLevels,
-            weightage,
-            groupedTools, 
+            targetLevel, sortedLevels, weightage, groupedTools, 
             assessments: processedToolsFlat, 
-            see: seeConfig,
+            see: { total: seeTool?.maxMarks || 100, coMap: seeCoMap, colSpan: 3 },
             schemeName: selectedCourse.scheme_details?.name || 'Default Scheme'
         };
     }, [selectedCourse]);
 
-    // --- 4. CALCULATE ATTAINMENT DATA ---
+    // --- 4. CALCULATE RAW STUDENT MATRIX (Blazing fast because courseMarks is small) ---
     const data = useMemo(() => {
-        if (!selectedCourseId || !courseConfig) return null;
-
-        const students = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
+        if (!courseStudents.length || !courseConfig) return null;
 
         const getLevel = (percentage) => {
             if (isNaN(percentage)) return 0;
@@ -197,15 +171,11 @@ const CoPoAttainmentPage = () => {
             return match ? match.level : 0;
         };
 
-        const isStudentAbsent = (val) => {
-            const v = String(val || '').toUpperCase().trim();
-            return ['AB', 'ABSENT', 'A', 'NA', '-'].includes(v);
-        };
+        const isStudentAbsent = (val) => ['AB', 'ABSENT', 'A', 'NA', '-'].includes(String(val || '').toUpperCase().trim());
 
-        // Strict Total Calculation: Only sums defined parts
+        // STRICT TOTAL CALCULATOR
         const getScoreTotal = (scores, parts) => {
             if (!scores) return 0;
-            
             if (parts && parts.length > 0) {
                 return parts.reduce((sum, part) => {
                     const val = scores[part.co];
@@ -213,8 +183,6 @@ const CoPoAttainmentPage = () => {
                     return sum + (isNaN(num) ? 0 : num);
                 }, 0);
             }
-
-            // Fallback
             return Object.entries(scores).reduce((sum, [key, val]) => {
                 if (key.startsWith('_')) return sum; 
                 const num = parseFloat(val);
@@ -222,32 +190,23 @@ const CoPoAttainmentPage = () => {
             }, 0);
         };
 
-        // Robust Matching Helpers
+        // ROBUST MATCHING HELPERS
         const normalize = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, ''); 
         const extractNumber = (str) => {
             const match = String(str).match(/(\d+)/);
             return match ? match[1] : null;
         };
 
-        return students.map(student => {
+        return courseStudents.map(student => {
             const row = { student, assessments: {} };
+            const studentMarks = courseMarks.filter(m => m.student === student.id);
 
             courseConfig.assessments.forEach(assessment => {
-                let markRecord = allMarks.find(m => 
-                    m.student === student.id && 
-                    m.course === selectedCourseId && 
-                    m.assessment_name === assessment.id
-                );
-                
+                let markRecord = studentMarks.find(m => m.assessment_name === assessment.id);
                 let scores = markRecord?.scores || {};
                 let isOverridden = false;
 
-                // --- IMPROVEMENT CHECK ---
-                const studentMarks = allMarks.filter(m => 
-                    m.student === student.id && 
-                    m.course === selectedCourseId
-                );
-
+                // --- ROBUST IMPROVEMENT CHECK ---
                 const improvementRecord = studentMarks.find(m => {
                     const targetNew = m.improvement_test_for;
                     const targetOld = m.scores?._improvementTarget;
@@ -258,9 +217,7 @@ const CoPoAttainmentPage = () => {
                     const currentTitle = assessment.title;
 
                     // 1. Strict Normalization Match
-                    if (normalize(target) === normalize(currentTitle)) {
-                        return true;
-                    }
+                    if (normalize(target) === normalize(currentTitle)) return true;
 
                     // 2. Number + Keyword Match
                     const tNorm = normalize(target);
@@ -285,78 +242,65 @@ const CoPoAttainmentPage = () => {
                     }
                 }
 
-                // 3. Process Scores
+                // --- Process Final Scores into Table Cells ---
                 let currentTotal = 0;
                 const parts = assessment.parts.map(part => {
                     let rawVal = scores[part.co];
+                    
                     if (rawVal === undefined && Object.keys(scores).filter(k => !k.startsWith('_')).length === 1) {
                          const singleVal = Object.values(scores).find(v => !String(v).startsWith('_'));
                          if (singleVal !== undefined) rawVal = singleVal;
                     }
+
                     const absent = isStudentAbsent(rawVal);
                     const obtained = absent ? 0 : parseFloat(rawVal || 0);
                     if (!absent) currentTotal += obtained;
                     const percentage = part.max > 0 ? (obtained / part.max) * 100 : 0;
-                    const level = getLevel(percentage);
                     return {
-                        co: part.co,
-                        max: part.max,
-                        obtained: obtained,
-                        isAbsent: absent,
+                        co: part.co, max: part.max, obtained, isAbsent: absent,
                         targetMet: !absent && percentage >= courseConfig.targetLevel,
-                        score: level         
+                        score: getLevel(percentage)         
                     };
                 });
 
-                row.assessments[assessment.id] = {
-                    total: currentTotal,
-                    parts: parts,
-                    isOverridden: isOverridden
-                };
+                row.assessments[assessment.id] = { total: currentTotal, parts, isOverridden };
             });
 
-            // Process SEE
-            const seeRecord = allMarks.find(m => 
-                m.student === student.id && 
-                m.course === selectedCourseId && 
-                (m.assessment_name === 'SEE' || m.assessment_name === 'Semester End Exam')
-            );
+            // SEE Processing
+            const seeRecord = studentMarks.find(m => m.assessment_name === 'SEE' || m.assessment_name === 'Semester End Exam');
             let seeObtained = 0;
             let seeAbsent = false;
             if (seeRecord && seeRecord.scores) {
                  const rawVals = Object.values(seeRecord.scores);
-                 if (rawVals.some(v => isStudentAbsent(v))) { seeAbsent = true; } 
-                 else { seeObtained = rawVals.reduce((a, b) => a + (parseFloat(b)||0), 0); }
+                 if (rawVals.some(isStudentAbsent)) seeAbsent = true; 
+                 else seeObtained = rawVals.reduce((a, b) => a + (parseFloat(b)||0), 0);
             }
             const seePercent = courseConfig.see.total > 0 ? (seeObtained / courseConfig.see.total) * 100 : 0;
+            
             row.see = {
-                obtained: seeObtained,
-                isAbsent: seeAbsent,
+                obtained: seeObtained, isAbsent: seeAbsent,
                 targetMet: !seeAbsent && seePercent >= courseConfig.targetLevel,
                 score: getLevel(seePercent)
             };
 
             return row;
         });
-    }, [selectedCourseId, allStudents, allMarks, courseConfig]);
+    }, [courseStudents, courseMarks, courseConfig]);
 
-    // --- 5. SUMMARIZE DATA ---
+    // --- 5. CLASS AVERAGE FOOTER SUMMARY ---
     const summary = useMemo(() => {
         if (!data || !courseConfig) return null;
         const s = { assessments: {}, see: { yCount: 0, totalMarks: 0, absentCount: 0 } };
-        courseConfig.assessments.forEach(assessment => {
-            s.assessments[assessment.id] = { parts: [] };
-            assessment.parts.forEach((_, idx) => {
-                s.assessments[assessment.id].parts[idx] = { yCount: 0, totalMarks: 0, absentCount: 0 };
-            });
+        courseConfig.assessments.forEach(a => {
+            s.assessments[a.id] = { parts: a.parts.map(() => ({ yCount: 0, totalMarks: 0, absentCount: 0 })) };
         });
         data.forEach(row => {
-            courseConfig.assessments.forEach(assessment => {
-                row.assessments[assessment.id].parts.forEach((p, idx) => {
-                    if (p.isAbsent) s.assessments[assessment.id].parts[idx].absentCount++;
+            courseConfig.assessments.forEach(a => {
+                row.assessments[a.id].parts.forEach((p, idx) => {
+                    if (p.isAbsent) s.assessments[a.id].parts[idx].absentCount++;
                     else {
-                        s.assessments[assessment.id].parts[idx].totalMarks += p.obtained;
-                        if (p.targetMet) s.assessments[assessment.id].parts[idx].yCount++;
+                        s.assessments[a.id].parts[idx].totalMarks += p.obtained;
+                        if (p.targetMet) s.assessments[a.id].parts[idx].yCount++;
                     }
                 });
             });
@@ -369,118 +313,66 @@ const CoPoAttainmentPage = () => {
         return s;
     }, [data, courseConfig]);
 
-    // --- 6. FINAL ATTAINMENT ---
-    const finalAttainmentData = useMemo(() => {
-        if (!data || !summary || !courseConfig || !selectedCourse) return null;
-        const coStats = {};
-        const allCos = new Set();
-        courseConfig.assessments.forEach(a => a.parts.forEach(p => allCos.add(p.co)));
-        (selectedCourse.cos || []).forEach(c => allCos.add(c.id));
-        allCos.forEach(co => { coStats[co] = { cieLevels: [], seeLevels: [] }; });
-        data.forEach(row => {
-            if (!row.see.isAbsent) {
-                 courseConfig.see.coMap.forEach(coId => { if (coStats[coId]) coStats[coId].seeLevels.push(row.see.score); });
-            }
-            courseConfig.assessments.forEach(assessment => {
-                const studentAssessment = row.assessments[assessment.id];
-                if (studentAssessment && studentAssessment.parts) {
-                    studentAssessment.parts.forEach(studentPart => {
-                        if (!studentPart.isAbsent && coStats[studentPart.co]) {
-                            coStats[studentPart.co].cieLevels.push(studentPart.score);
-                        }
-                    });
-                }
-            });
-        });
-        const indirectMap = selectedCourse.settings?.indirect_attainment || {};
-        const wDirect = parseFloat(courseConfig.weightage?.direct) || 80;
-        const wIndirect = parseFloat(courseConfig.weightage?.indirect) || 20;
-        const rows = Array.from(allCos).sort().map(co => {
-            const stats = coStats[co];
-            const cieAvg = stats.cieLevels.length ? stats.cieLevels.reduce((a, b) => a + b, 0) / stats.cieLevels.length : 0;
-            const seeAvg = stats.seeLevels.length ? stats.seeLevels.reduce((a, b) => a + b, 0) / stats.seeLevels.length : 0;
-            const directAttainment = (cieAvg + seeAvg) / 2;
-            let indirectVal = 3;
-            if (indirectMap[co] !== undefined) {
-                const parsed = parseFloat(indirectMap[co]);
-                if (!isNaN(parsed)) indirectVal = parsed;
-            }
-            const scoreIndex = ((wDirect / 100) * directAttainment) + ((wIndirect / 100) * indirectVal);
-            return { co, cieLevel: cieAvg, seeLevel: seeAvg, direct: directAttainment, indirect: indirectVal, scoreIndex };
-        });
-        const rowCount = rows.length || 1; 
-        const avgRow = {
-            co: 'AVERAGE',
-            cieLevel: rows.length ? rows.reduce((s, r) => s + r.cieLevel, 0) / rowCount : 0,
-            seeLevel: rows.length ? rows.reduce((s, r) => s + r.seeLevel, 0) / rowCount : 0,
-            direct: rows.length ? rows.reduce((s, r) => s + r.direct, 0) / rowCount : 0,
-            indirect: rows.length ? rows.reduce((s, r) => s + r.indirect, 0) / rowCount : 0,
-            scoreIndex: rows.length ? rows.reduce((s, r) => s + r.scoreIndex, 0) / rowCount : 0,
-        };
-        return { rows, avgRow };
-    }, [data, summary, courseConfig, selectedCourse]);
-
-    const poAttainmentData = useMemo(() => {
-        if (!finalAttainmentData || !selectedCourse || !matrixMap[selectedCourseId]) return null;
-        const { rows: coRows } = finalAttainmentData;
-        const courseMatrix = matrixMap[selectedCourseId]; 
+    // --- 6. BUILD EXPECTED/ACTUAL PO GRID (Using Backend Data!) ---
+    const poAttainmentGrid = useMemo(() => {
+        if (!reportData || !selectedCourse || !courseMatrix) return null;
+        
         const outcomes = [...pos, ...psos]; 
-        const expectedRows = coRows.map(row => {
+        
+        // Build "Expected" using the Articulation Matrix mappings
+        const expectedRows = reportData.co_attainment.map(coData => {
             const outcomeValues = {};
             outcomes.forEach(outcome => {
-                let val = courseMatrix[row.co]?.[outcome.id];
-                if (val === undefined) {
-                     const coIndex = parseInt(row.co.replace(/\D/g, '')) - 1;
-                     if (selectedCourse.cos && selectedCourse.cos[coIndex]) {
-                         val = courseMatrix[selectedCourse.cos[coIndex].id]?.[outcome.id];
-                     }
-                }
-                outcomeValues[outcome.id] = val !== undefined && val !== "" ? parseFloat(val) : '-';
+                let val = courseMatrix[coData.co]?.[outcome.id];
+                outcomeValues[outcome.id] = (val !== undefined && val !== "" && val !== "-") ? parseFloat(val) : '-';
             });
-            return { co: row.co, values: outcomeValues };
+            return { co: coData.co, values: outcomeValues };
         });
+
+        // Averages for Expected
         const expectedAvg = {};
         outcomes.forEach(outcome => {
             let sum = 0, count = 0;
             expectedRows.forEach(r => {
-                if (r.values[outcome.id] !== '-') {
-                    sum += r.values[outcome.id];
-                    count++;
-                }
+                if (r.values[outcome.id] !== '-') { sum += r.values[outcome.id]; count++; }
             });
             expectedAvg[outcome.id] = count > 0 ? (sum / count).toFixed(2) : '-';
         });
-        const actualRows = expectedRows.map((row, idx) => {
-             const coLevel = coRows[idx].scoreIndex; 
+
+        // Build "Actual" by multiplying mapping by Backend Score Index
+        const normFactor = reportData.scheme_used ? 3 : 3; // From Phase 1 rules
+        const actualRows = expectedRows.map((row) => {
+             const backendCoData = reportData.co_attainment.find(c => c.co === row.co);
+             const coLevel = backendCoData ? backendCoData.score_index : 0;
              const actualValues = {};
+             
              outcomes.forEach(outcome => {
                  const mapping = row.values[outcome.id];
                  if (mapping !== '-') {
-                     const val = (mapping * coLevel) / 3;
+                     const val = (mapping * coLevel) / normFactor;
                      actualValues[outcome.id] = parseFloat(val.toFixed(2));
-                 } else {
-                     actualValues[outcome.id] = '-';
-                 }
+                 } else actualValues[outcome.id] = '-';
              });
              return { co: row.co, values: actualValues };
         });
-         const actualAvg = {};
-         outcomes.forEach(outcome => {
+
+        // Averages for Actual
+        const actualAvg = {};
+        outcomes.forEach(outcome => {
              let sum = 0, count = 0;
              actualRows.forEach(r => {
-                 if (r.values[outcome.id] !== '-') {
-                     sum += r.values[outcome.id];
-                     count++;
-                 }
+                 if (r.values[outcome.id] !== '-') { sum += r.values[outcome.id]; count++; }
              });
              actualAvg[outcome.id] = count > 0 ? (sum / count).toFixed(2) : '-';
-         });
-        return { outcomes, expectedRows, expectedAvg, actualRows, actualAvg };
-    }, [finalAttainmentData, selectedCourse, selectedCourseId, matrixMap, pos, psos]);
+        });
 
-    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
+        return { outcomes, expectedRows, expectedAvg, actualRows, actualAvg };
+    }, [reportData, selectedCourse, courseMatrix, pos, psos]);
+
+    if (loading && !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
     if (!user) return null;
 
+    // --- RENDER HELPERS ---
     const renderTableHeader = () => (
         <thead className="text-center text-xs font-bold text-gray-800 bg-gray-200 dark:bg-gray-800 dark:text-gray-200 uppercase border-b-2 border-gray-400">
             <tr>
@@ -565,31 +457,26 @@ const CoPoAttainmentPage = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 pb-10">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">CO-PO Attainment</h1>
                     <div className="flex items-center gap-2 mt-1">
                         <p className="text-gray-500 dark:text-gray-400">Scheme: <span className="font-bold text-primary-600 dark:text-primary-400">{courseConfig?.schemeName || 'Loading...'}</span></p>
-                        {courseConfig && (
-                            <div className="flex flex-wrap gap-2 text-xs">
-                                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded border dark:bg-gray-700 dark:text-gray-300">Pass: {courseConfig.targetLevel}%</span>
-                                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded border dark:bg-gray-700 dark:text-gray-300">Levels: {courseConfig.sortedLevels.map(l => `L${l.level}>${l.threshold}%`).join(', ')}</span>
-                                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded border dark:bg-gray-700 dark:text-gray-300">Weights: {courseConfig.weightage.direct}% Direct / {courseConfig.weightage.indirect}% Indirect</span>
-                            </div>
-                        )}
                     </div>
                 </div>
                 <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} className="block w-full mt-4 sm:mt-0 sm:w-96 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                    {assignedCourses.map(course => <option key={course.id} value={course.id}>{course.code} - {course.name}</option>)}
-                    {assignedCourses.length === 0 && <option>No courses assigned</option>}
+                    {courses.map(course => <option key={course.id} value={course.id}>{course.code} - {course.name}</option>)}
+                    {courses.length === 0 && <option>No courses assigned</option>}
                 </select>
             </div>
             
+            {loading && <div className="text-sm text-gray-500 flex items-center"><Loader2 className="w-4 h-4 mr-2 animate-spin"/> Refreshing Matrix...</div>}
+
             {data && courseConfig ? (
-                <Card className="w-full overflow-hidden">
+                <Card className="w-full overflow-hidden shadow-sm">
                     <CardContent className="p-0">
-                        <div className="overflow-x-auto max-h-[60vh]">
+                        <div className="overflow-x-auto max-h-[60vh] custom-scrollbar">
                             <table className="min-w-max text-center border-collapse">
                                 {renderTableHeader()}
                                 <tbody className="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
@@ -597,7 +484,7 @@ const CoPoAttainmentPage = () => {
                                         <tr key={row.student.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                                             <td className="sticky left-0 bg-white dark:bg-gray-900 border-r border-gray-300 p-2 font-medium">{idx + 1}</td>
                                             <td className="sticky left-12 bg-white dark:bg-gray-900 border-r border-gray-300 p-2 font-mono whitespace-nowrap">{row.student.usn}</td>
-                                            <td className="sticky left-40 bg-white dark:bg-gray-900 border-r border-gray-300 p-2 text-left whitespace-nowrap overflow-hidden text-ellipsis max-w-[12rem]">{row.student.name}</td>
+                                            <td className="sticky left-40 bg-white dark:bg-gray-900 border-r border-gray-300 p-2 text-left whitespace-nowrap overflow-hidden text-ellipsis max-w-[12rem]" title={row.student.name}>{row.student.name}</td>
                                             {courseConfig.assessments.map(assessment => {
                                                 const aData = row.assessments[assessment.id];
                                                 const overrideClass = aData.isOverridden ? 'bg-yellow-50 dark:bg-yellow-900/20' : '';
@@ -626,95 +513,87 @@ const CoPoAttainmentPage = () => {
                     </CardContent>
                 </Card>
             ) : (
-                <div className="p-12 text-center text-gray-500 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
+                <div className="p-12 text-center text-gray-500 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 shadow-sm mt-4">
                     <AlertCircle className="mx-auto h-12 w-12 text-gray-400 mb-2" />
                     <h3 className="text-lg font-medium">No Data Available</h3>
-                    <p>Please select a course to view attainment data. Ensure assessments and marks are entered.</p>
+                    <p>Please select a course or ensure marks have been entered for this subject.</p>
                 </div>
             )}
 
-            {/* Final Summaries */}
-            {finalAttainmentData && (
-                <>
-                    <Card>
-                        <CardHeader><CardTitle>Final CO Attainment Summary</CardTitle></CardHeader>
+            {/* --- FINAL BACKEND SUMMARIES --- */}
+            {reportData && (
+                <div className="mt-8 space-y-6">
+                    <Card className="shadow-sm">
+                        <CardHeader>
+                            <CardTitle>Final CO Attainment Summary</CardTitle>
+                        </CardHeader>
                         <CardContent>
                              <div className="overflow-x-auto border dark:border-gray-600 rounded-lg">
                                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-center text-sm">
                                     <thead className="bg-gray-100 dark:bg-gray-700 font-bold">
                                             <tr>
-                                                <th className="px-4 py-2 border-r">CO</th>
-                                                <th className="px-4 py-2 border-r">CIE Avg Level</th>
-                                                <th className="px-4 py-2 border-r">SEE Avg Level</th>
-                                                <th className="px-4 py-2 border-r">Direct Attainment</th>
-                                                <th className="px-4 py-2 border-r">Indirect Attainment</th>
-                                                <th className="px-4 py-2 bg-green-100 dark:bg-green-900/30">Final Score Index</th>
+                                                <th className="px-4 py-3 border-r">Course Outcome (CO)</th>
+                                                <th className="px-4 py-3 border-r">CIE Avg Level</th>
+                                                <th className="px-4 py-3 border-r">SEE Avg Level</th>
+                                                <th className="px-4 py-3 border-r text-primary-600">Direct Attainment (DA)</th>
+                                                <th className="px-4 py-3 border-r text-purple-600">Indirect Attainment (IA)</th>
+                                                <th className="px-4 py-3 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200">Final Score Index</th>
                                             </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                        {finalAttainmentData.rows.map(row => (
-                                            <tr key={row.co}>
-                                                <td className="px-4 py-2 border-r font-bold">{row.co}</td>
-                                                <td className="px-4 py-2 border-r">{row.cieLevel.toFixed(2)}</td>
-                                                <td className="px-4 py-2 border-r">{row.seeLevel.toFixed(2)}</td>
-                                                <td className="px-4 py-2 border-r">{row.direct.toFixed(2)}</td>
-                                                <td className="px-4 py-2 border-r">{row.indirect.toFixed(2)}</td>
-                                                <td className="px-4 py-2 font-bold">{row.scoreIndex.toFixed(2)}</td>
+                                        {reportData.co_attainment.map(row => (
+                                            <tr key={row.co} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                                <td className="px-4 py-3 border-r font-bold">{row.co}</td>
+                                                <td className="px-4 py-3 border-r">{row.cie_level.toFixed(2)}</td>
+                                                <td className="px-4 py-3 border-r">{row.see_level.toFixed(2)}</td>
+                                                <td className="px-4 py-3 border-r">{row.direct_attainment.toFixed(2)}</td>
+                                                <td className="px-4 py-3 border-r">{row.indirect_attainment.toFixed(2)}</td>
+                                                <td className="px-4 py-3 font-bold text-lg">{row.score_index.toFixed(2)}</td>
                                             </tr>
                                         ))}
                                     </tbody>
-                                     <tfoot className="bg-orange-100 dark:bg-orange-900/30 font-bold">
-                                        <tr>
-                                            <td className="px-4 py-2 border-r">AVERAGE</td>
-                                            <td className="px-4 py-2 border-r">{finalAttainmentData.avgRow.cieLevel.toFixed(2)}</td>
-                                            <td className="px-4 py-2 border-r">{finalAttainmentData.avgRow.seeLevel.toFixed(2)}</td>
-                                            <td className="px-4 py-2 border-r">{finalAttainmentData.avgRow.direct.toFixed(2)}</td>
-                                            <td className="px-4 py-2 border-r">{finalAttainmentData.avgRow.indirect.toFixed(2)}</td>
-                                            <td className="px-4 py-2">{finalAttainmentData.avgRow.scoreIndex.toFixed(2)}</td>
-                                        </tr>
-                                    </tfoot>
                                 </table>
                             </div>
                         </CardContent>
                     </Card>
 
-                    {/* PO Attainment Tables */}
-                    {poAttainmentData && (
-                        <div className="space-y-6">
+                    {/* PO Attainment Tables (Expected vs Actual) */}
+                    {poAttainmentGrid && (
+                        <div className="grid grid-cols-1 gap-6">
                             {['EXPECTED', 'ACTUAL'].map(type => {
-                                const rows = type === 'EXPECTED' ? poAttainmentData.expectedRows : poAttainmentData.actualRows;
-                                const avg = type === 'EXPECTED' ? poAttainmentData.expectedAvg : poAttainmentData.actualAvg;
-                                const colorClass = type === 'EXPECTED' ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-green-100 dark:bg-green-900/30';
+                                const rows = type === 'EXPECTED' ? poAttainmentGrid.expectedRows : poAttainmentGrid.actualRows;
+                                const avg = type === 'EXPECTED' ? poAttainmentGrid.expectedAvg : poAttainmentGrid.actualAvg;
+                                const colorClass = type === 'EXPECTED' ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200' : 'bg-green-50 dark:bg-green-900/20 border-green-200';
                                 
                                 return (
-                                    <Card key={type}>
+                                    <Card key={type} className={`shadow-sm border ${colorClass}`}>
                                         <CardHeader>
-                                            <CardTitle className="text-sm uppercase">{type} Attainment of PO by Attainment of CO</CardTitle>
+                                            <CardTitle className="text-sm uppercase tracking-wider">{type} Attainment of PO by CO</CardTitle>
                                         </CardHeader>
                                         <CardContent>
-                                            <div className="overflow-x-auto border dark:border-gray-600 rounded-lg">
+                                            <div className="overflow-x-auto rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-600">
                                                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-center text-xs sm:text-sm">
-                                                    <thead className={colorClass + " font-bold"}>
+                                                    <thead className="bg-gray-100 dark:bg-gray-700 font-bold">
                                                         <tr>
-                                                            <th className="px-2 py-2 border-r w-24">CO</th>
-                                                            {poAttainmentData.outcomes.map(o => <th key={o.id} className="px-2 py-2 border-r">{o.id}</th>)}
+                                                            <th className="px-2 py-3 border-r w-24">CO</th>
+                                                            {poAttainmentGrid.outcomes.map(o => <th key={o.id} className="px-2 py-3 border-r">{o.id}</th>)}
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                                                         {rows.map(row => (
                                                             <tr key={row.co}>
                                                                 <td className="px-2 py-2 border-r font-bold bg-gray-50 dark:bg-gray-800">{row.co}</td>
-                                                                {poAttainmentData.outcomes.map(o => (
+                                                                {poAttainmentGrid.outcomes.map(o => (
                                                                     <td key={o.id} className="px-2 py-2 border-r">{row.values[o.id]}</td>
                                                                 ))}
                                                             </tr>
                                                         ))}
                                                     </tbody>
-                                                    <tfoot className="bg-gray-100 dark:bg-gray-700 font-bold">
+                                                    <tfoot className="bg-gray-200 dark:bg-gray-700 font-bold border-t-2 border-gray-400">
                                                         <tr>
-                                                            <td className="px-2 py-2 border-r">AVG</td>
-                                                            {poAttainmentData.outcomes.map(o => (
-                                                                <td key={o.id} className="px-2 py-2 border-r">{avg[o.id]}</td>
+                                                            <td className="px-2 py-3 border-r">AVG</td>
+                                                            {poAttainmentGrid.outcomes.map(o => (
+                                                                <td key={o.id} className="px-2 py-3 border-r text-primary-700 dark:text-primary-300">{avg[o.id]}</td>
                                                             ))}
                                                         </tr>
                                                     </tfoot>
@@ -726,7 +605,7 @@ const CoPoAttainmentPage = () => {
                             })}
                         </div>
                     )}
-                </>
+                </div>
             )}
         </div>
     );

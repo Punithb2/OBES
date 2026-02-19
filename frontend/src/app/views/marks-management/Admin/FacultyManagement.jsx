@@ -4,7 +4,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
 import { Icons } from '../shared/icons';
 
-// --- 1. FACULTY MODAL COMPONENT (Updated with Password & Correct Fields) ---
+// --- 1. FACULTY MODAL COMPONENT ---
 const FacultyModal = ({ isOpen, onClose, onSave, faculty = null }) => {
     const [formData, setFormData] = useState({ name: '', email: '', password: '' });
 
@@ -119,9 +119,15 @@ const FacultyManagement = () => {
 
         try {
             setLoading(true);
-            // 1. FILTER by 'department' (not departmentId) to match Django ViewSet
+            // 1. FILTER by 'department' to match Django ViewSet
             const response = await api.get(`/users/?role=faculty&department=${user.department}`);
-            setFaculty(response.data);
+            
+            // FIX: Handle Django's paginated responses correctly!
+            const fetchedFaculty = response.data.results || response.data;
+            
+            // Set the state with the safe array
+            setFaculty(Array.isArray(fetchedFaculty) ? fetchedFaculty : []);
+            
         } catch (error) {
             console.error("Failed to fetch faculty", error);
         } finally {

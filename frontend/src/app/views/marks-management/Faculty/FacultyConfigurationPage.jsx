@@ -250,8 +250,14 @@ const FacultyConfigurationPage = () => {
             try {
                 setLoading(true);
                 const res = await api.get('/courses/');
-                const myCourses = res.data.filter(c => String(c.assigned_faculty) === String(user.id));
+                
+                // FIX: Look for .results first, fallback to .data if pagination is off
+                const coursesData = res.data.results || res.data;
+                
+                // Now run the filter on the actual array
+                const myCourses = coursesData.filter(c => String(c.assigned_faculty) === String(user.id));
                 setCourses(myCourses);
+                
                 if (myCourses.length > 0 && !selectedCourseId) {
                     setSelectedCourseId(myCourses[0].id);
                 }
@@ -592,7 +598,7 @@ const FacultyConfigurationPage = () => {
                                                                 <input 
                                                                     type="number" 
                                                                     min="0"
-                                                                    value={tool.maxMarks}
+                                                                    value={tool.maxMarks ?? ''}
                                                                     onChange={(e) => updateToolMeta(tool.id, 'maxMarks', parseInt(e.target.value))}
                                                                     className="block w-full rounded-md border-gray-300 shadow-sm text-sm font-bold text-gray-900 dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                                                                 />
@@ -602,7 +608,7 @@ const FacultyConfigurationPage = () => {
                                                                 <input 
                                                                     type="number" 
                                                                     min="0"
-                                                                    value={tool.weightage}
+                                                                    value={tool.weightage ?? ''}
                                                                     onChange={(e) => updateToolMeta(tool.id, 'weightage', parseInt(e.target.value))}
                                                                     className="block w-full rounded-md border-primary-300 shadow-sm text-sm font-bold text-primary-700 bg-primary-50 dark:bg-gray-800 dark:border-primary-500 dark:text-white"
                                                                 />
@@ -652,7 +658,7 @@ const FacultyConfigurationPage = () => {
                                                                                         type="number"
                                                                                         min="0"
                                                                                         placeholder="-"
-                                                                                        value={tool.coDistribution?.[co.id] || ''}
+                                                                                        value={tool.coDistribution?.[co.id] ?? ''}
                                                                                         onChange={(e) => updateToolCoDistribution(tool.id, co.id, e.target.value)}
                                                                                         className={`block w-full text-center rounded-md text-sm font-bold focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-800 dark:text-white ${
                                                                                             (tool.coDistribution?.[co.id] > 0) 

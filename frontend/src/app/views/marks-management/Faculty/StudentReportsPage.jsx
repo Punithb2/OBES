@@ -2,12 +2,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
-import { Download, Loader2, Search, Filter, Eye } from 'lucide-react'; // Added Eye
-import { useNavigate } from 'react-router-dom'; // Added useNavigate
+import { Download, Loader2, Search, Filter, Eye } from 'lucide-react'; 
+import { useNavigate } from 'react-router-dom'; 
 
 const StudentReportsPage = () => {
     const { user } = useAuth();
-    const navigate = useNavigate(); // Hook for navigation
+    const navigate = useNavigate(); 
     const [loading, setLoading] = useState(true);
 
     // Data States
@@ -19,30 +19,70 @@ const StudentReportsPage = () => {
     const [selectedCourseId, setSelectedCourseId] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
-    // 1. Fetch Data
+    // 1. Fetch Courses
     useEffect(() => {
-        const fetchData = async () => {
-            if (!user) return;
+      const fetchCourses = async () => {
+        if (!user) return;
+        setLoading(true);
+        try {
+            const res = await api.get('/courses/');
+        
+            // Safely extract data handling Django's paginated responses
+            const coursesData = res.data.results || res.data;
+        
+            // Ensure it's an array before filtering
+            const myCourses = Array.isArray(coursesData) 
+                ? coursesData.filter(c => String(c.assigned_faculty) === String(user.id))
+                : [];
+            
+            setCourses(myCourses);
+            if (myCourses.length > 0) setSelectedCourseId(myCourses[0].id);
+        } catch (error) {
+          console.error("Failed to load courses", error);
+        } finally {
+          setLoading(false);
+        }
+      };
+      fetchCourses();
+    }, [user]);
+
+    // 2. Fetch Students & Marks for the Selected Course (ADDED FIX)
+    useEffect(() => {
+        const fetchStudentData = async () => {
+            if (!selectedCourseId) return;
             setLoading(true);
             try {
-                const [coursesRes, studentsRes, marksRes] = await Promise.all([
-                    api.get('/courses/'),
+                // Fetch students and filtered marks simultaneously
+                const [studentsRes, marksRes] = await Promise.all([
                     api.get('/students/'),
-                    api.get('/marks/')
+                    api.get(`/marks/?course=${selectedCourseId}`)
                 ]);
-                setCourses(coursesRes.data);
-                setAllStudents(studentsRes.data);
-                setAllMarks(marksRes.data);
+
+                // Safely handle paginated backend responses
+                const fetchedStudents = studentsRes.data.results || studentsRes.data;
+                const fetchedMarks = marksRes.data.results || marksRes.data;
+
+                // Type-Safe Filtering: Convert both sides to Strings to guarantee a match
+                const courseStudents = Array.isArray(fetchedStudents) 
+                    ? fetchedStudents.filter(student => 
+                        student.courses && student.courses.map(String).includes(String(selectedCourseId))
+                      )
+                    : [];
+
+                setAllStudents(courseStudents);
+                setAllMarks(Array.isArray(fetchedMarks) ? fetchedMarks : []);
+
             } catch (error) {
-                console.error("Failed to fetch report data", error);
+                console.error("Failed to load student data", error);
             } finally {
                 setLoading(false);
             }
         };
-        fetchData();
-    }, [user]);
 
-    // 2. Filter Courses for Faculty
+        fetchStudentData();
+    }, [selectedCourseId]);
+
+    // 3. Filter Courses for Faculty
     const assignedCourses = useMemo(() => {
         if (!user || !courses.length) return [];
         return courses.filter(c => String(c.assigned_faculty) === String(user.id));
@@ -58,14 +98,13 @@ const StudentReportsPage = () => {
     }, [assignedCourses, selectedCourseId]);
 
     const selectedCourse = useMemo(() => 
-        courses.find(c => c.id === selectedCourseId), 
+        courses.find(c => String(c.id) === String(selectedCourseId)), 
     [courses, selectedCourseId]);
 
-    // 3. Process Student Data
+    // 4. Process Student Data
     const reportData = useMemo(() => {
         if (!selectedCourseId || !selectedCourse) return [];
 
-        const students = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
         const tools = selectedCourse.assessment_tools || [];
         const seeTool = tools.find(t => t.type === 'Semester End Exam' || t.name === 'SEE');
         
@@ -78,8 +117,8 @@ const StudentReportsPage = () => {
         });
         const maxTotal = maxCie + maxSee;
 
-        return students.map(student => {
-            const studentMarks = allMarks.filter(m => m.student === student.id && m.course === selectedCourseId);
+        return allStudents.map(student => {
+            const studentMarks = allMarks.filter(m => String(m.student) === String(student.id));
             
             let cieObtained = 0;
             let seeObtained = 0;
@@ -136,6 +175,7 @@ const StudentReportsPage = () => {
         link.setAttribute("download", `${selectedCourse.code}_Student_Report.csv`);
         document.body.appendChild(link);
         link.click();
+        document.body.removeChild(link);
     };
 
     // Navigation Handler
@@ -227,10 +267,10 @@ const StudentReportsPage = () => {
                                             <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-bold text-gray-900 dark:text-white">{student.total}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500 dark:text-gray-400">{student.percentage}%</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-center">
-                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                                <span className={`px-2 inline-flex text-xs leading-5 font-bold rounded-full ${
                                                     student.result === 'PASS' 
-                                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' 
-                                                    : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' 
+                                                    : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
                                                 }`}>
                                                     {student.result}
                                                 </span>

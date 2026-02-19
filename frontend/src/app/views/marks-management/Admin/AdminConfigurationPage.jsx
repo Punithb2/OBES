@@ -106,13 +106,13 @@ const AdminConfigurationPage = () => {
     const [loading, setLoading] = useState(true);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
-    // Default Configuration Templates
+    // Default Configuration Templates (Mapped to Phase 1 JSON Schema)
     const defaultRules = {
-        studentPassThreshold: 50,
-        maxAttainmentLevel: 3,
-        levelThresholds: { level3: 70, level2: 60, level1: 50 },
-        finalWeightage: { direct: 80, indirect: 20 },
-        directSplit: { cie: 50, see: 50 }
+        pass_criteria: 50,
+        attainment_levels: { level_3: 70, level_2: 60, level_1: 50 },
+        weightage: { direct: 80, indirect: 20 },
+        po_calculation: { normalization_factor: 3 },
+        direct_split: { cie: 50, see: 50 } // Custom addition for UI
     };
 
     const defaultTools = [
@@ -142,11 +142,16 @@ const AdminConfigurationPage = () => {
                 api.get('/psos/')
             ]);
 
-            setSchemes(schemesRes.data);
+            // Fix: Extract data from Django's paginated 'results' array
+            const fetchedSchemes = schemesRes.data.results || schemesRes.data;
+            const fetchedPos = posRes.data.results || posRes.data;
+            const fetchedPsos = psosRes.data.results || psosRes.data;
+
+            setSchemes(fetchedSchemes);
 
             // Select first scheme if none selected
-            if (schemesRes.data.length > 0 && !selectedSchemeId) {
-                loadSchemeData(schemesRes.data[0]);
+            if (fetchedSchemes.length > 0 && !selectedSchemeId) {
+                loadSchemeData(fetchedSchemes[0]);
             }
 
             // Handle Outcomes Sorting
@@ -155,8 +160,10 @@ const AdminConfigurationPage = () => {
                 const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
                 return numA - numB;
             };
-            setPos(posRes.data.sort(sortById));
-            setPsos(psosRes.data.sort(sortById));
+            
+            // Apply sorting to the correctly extracted arrays
+            setPos(fetchedPos.sort(sortById));
+            setPsos(fetchedPsos.sort(sortById));
 
         } catch (error) {
             console.error("Failed to load data", error);
@@ -168,7 +175,16 @@ const AdminConfigurationPage = () => {
     const loadSchemeData = (scheme) => {
         setSelectedSchemeId(scheme.id);
         const settings = scheme.settings || {};
-        setAttainmentRules(settings.attainment_rules || defaultRules);
+        
+        // Merge fetched data with defaults to prevent UI crashes if fields are missing
+        setAttainmentRules({
+            pass_criteria: settings.pass_criteria || defaultRules.pass_criteria,
+            attainment_levels: settings.attainment_levels || defaultRules.attainment_levels,
+            weightage: settings.weightage || defaultRules.weightage,
+            po_calculation: settings.po_calculation || defaultRules.po_calculation,
+            direct_split: settings.direct_split || defaultRules.direct_split
+        });
+        
         setIndirectTools(settings.indirect_tools || defaultTools);
     };
 
@@ -185,28 +201,26 @@ const AdminConfigurationPage = () => {
             id: formData.id,
             name: formData.name,
             settings: {
-                attainment_rules: defaultRules,
+                pass_criteria: defaultRules.pass_criteria,
+                attainment_levels: defaultRules.attainment_levels,
+                weightage: defaultRules.weightage,
+                po_calculation: defaultRules.po_calculation,
+                direct_split: defaultRules.direct_split,
                 indirect_tools: defaultTools
             }
         };
 
         try {
-            // POST to create
             const res = await api.post('/schemes/', payload);
-            
-            // Update Local State
             const newScheme = res.data;
             setSchemes([...schemes, newScheme]);
-            
-            // Auto-Select the new scheme
             loadSchemeData(newScheme);
             setIsCreateModalOpen(false);
-            
             alert(`Scheme "${newScheme.name}" created successfully!`);
         } catch (error) {
             console.error("Failed to create scheme", error);
             alert("Failed to create scheme. Ensure ID is unique.");
-            throw error; // Let modal know it failed
+            throw error;
         }
     };
 
@@ -216,7 +230,11 @@ const AdminConfigurationPage = () => {
 
         const payload = {
             settings: {
-                attainment_rules: attainmentRules,
+                pass_criteria: attainmentRules.pass_criteria,
+                attainment_levels: attainmentRules.attainment_levels,
+                weightage: attainmentRules.weightage,
+                po_calculation: attainmentRules.po_calculation,
+                direct_split: attainmentRules.direct_split,
                 indirect_tools: indirectTools
             }
         };
@@ -236,8 +254,6 @@ const AdminConfigurationPage = () => {
 
         try {
             await api.delete(`/schemes/${selectedSchemeId}/`);
-            
-            // Update local state
             const remaining = schemes.filter(s => s.id !== selectedSchemeId);
             setSchemes(remaining);
             
@@ -266,13 +282,13 @@ const AdminConfigurationPage = () => {
 
     const handleDirectWeightChange = (val) => {
         setAttainmentRules(prev => ({
-            ...prev, finalWeightage: { direct: val, indirect: 100 - val }
+            ...prev, weightage: { direct: val, indirect: 100 - val }
         }));
     };
 
     const handleCieWeightChange = (val) => {
         setAttainmentRules(prev => ({
-            ...prev, directSplit: { cie: val, see: 100 - val }
+            ...prev, direct_split: { cie: val, see: 100 - val }
         }));
     };
 
@@ -367,8 +383,8 @@ const AdminConfigurationPage = () => {
                                     <div className="flex items-center gap-2">
                                         <input 
                                             type="number" 
-                                            value={attainmentRules.studentPassThreshold}
-                                            onChange={(e) => updateRule(null, 'studentPassThreshold', e.target.value)}
+                                            value={attainmentRules.pass_criteria}
+                                            onChange={(e) => updateRule(null, 'pass_criteria', e.target.value)}
                                             className="w-20 rounded-md border-gray-300 text-gray-900 font-bold dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:ring-primary-500 focus:border-primary-500 text-center"
                                         />
                                         <span className="text-sm font-bold text-gray-900 dark:text-gray-300">%</span>
@@ -384,7 +400,7 @@ const AdminConfigurationPage = () => {
                                 <CardDescription>Percentage of students required to achieve each level.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-3">
-                                {['level3', 'level2', 'level1'].map((level, idx) => (
+                                {['level_3', 'level_2', 'level_1'].map((level, idx) => (
                                     <div key={level} className="flex items-center justify-between border-b border-gray-100 last:border-0 pb-2 last:pb-0 dark:border-gray-700">
                                         <span className="text-sm font-bold text-gray-800 dark:text-gray-200">
                                             Level {3 - idx}
@@ -393,8 +409,8 @@ const AdminConfigurationPage = () => {
                                             <span className="text-xs text-gray-600 font-medium dark:text-gray-400">Above</span>
                                             <input 
                                                 type="number" 
-                                                value={attainmentRules.levelThresholds[level]}
-                                                onChange={(e) => updateRule('levelThresholds', level, e.target.value)}
+                                                value={attainmentRules.attainment_levels[level]}
+                                                onChange={(e) => updateRule('attainment_levels', level, e.target.value)}
                                                 className="w-20 rounded-md border-gray-300 text-gray-900 font-semibold dark:bg-gray-800 dark:border-gray-600 dark:text-white text-sm text-center"
                                             />
                                             <span className="text-xs text-gray-700 font-bold dark:text-gray-300">% Students</span>
@@ -414,11 +430,11 @@ const AdminConfigurationPage = () => {
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <label className="text-gray-900 font-semibold dark:text-gray-200">CIE (Internals)</label>
-                                        <span className="font-bold text-primary-700 dark:text-primary-400">{attainmentRules.directSplit.cie}%</span>
+                                        <span className="font-bold text-primary-700 dark:text-primary-400">{attainmentRules.direct_split.cie}%</span>
                                     </div>
                                     <input 
                                         type="range" min="0" max="100" 
-                                        value={attainmentRules.directSplit.cie} 
+                                        value={attainmentRules.direct_split.cie} 
                                         onChange={(e) => handleCieWeightChange(parseInt(e.target.value))}
                                         className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-primary-600 dark:bg-gray-600"
                                     />
@@ -426,11 +442,11 @@ const AdminConfigurationPage = () => {
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <label className="text-gray-900 font-semibold dark:text-gray-200">SEE (University Exam)</label>
-                                        <span className="font-bold text-blue-700 dark:text-blue-400">{attainmentRules.directSplit.see}%</span>
+                                        <span className="font-bold text-blue-700 dark:text-blue-400">{attainmentRules.direct_split.see}%</span>
                                     </div>
                                     <input 
                                         type="range" min="0" max="100" 
-                                        value={attainmentRules.directSplit.see} 
+                                        value={attainmentRules.direct_split.see} 
                                         disabled
                                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-not-allowed dark:bg-gray-700"
                                     />
@@ -448,11 +464,11 @@ const AdminConfigurationPage = () => {
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <label className="text-gray-900 font-semibold dark:text-gray-200">Direct Attainment (DA)</label>
-                                        <span className="font-bold text-primary-700 dark:text-primary-400">{attainmentRules.finalWeightage.direct}%</span>
+                                        <span className="font-bold text-primary-700 dark:text-primary-400">{attainmentRules.weightage.direct}%</span>
                                     </div>
                                     <input 
                                         type="range" min="0" max="100" 
-                                        value={attainmentRules.finalWeightage.direct} 
+                                        value={attainmentRules.weightage.direct} 
                                         onChange={(e) => handleDirectWeightChange(parseInt(e.target.value))}
                                         className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-primary-600 dark:bg-gray-600"
                                     />
@@ -460,13 +476,25 @@ const AdminConfigurationPage = () => {
                                 <div>
                                     <div className="flex justify-between text-sm mb-1">
                                         <label className="text-gray-900 font-semibold dark:text-gray-200">Indirect Attainment (IA)</label>
-                                        <span className="font-bold text-purple-700 dark:text-purple-400">{attainmentRules.finalWeightage.indirect}%</span>
+                                        <span className="font-bold text-purple-700 dark:text-purple-400">{attainmentRules.weightage.indirect}%</span>
                                     </div>
                                     <input 
                                         type="range" min="0" max="100" 
-                                        value={attainmentRules.finalWeightage.indirect} 
+                                        value={attainmentRules.weightage.indirect} 
                                         disabled
                                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-not-allowed dark:bg-gray-700"
+                                    />
+                                </div>
+                                
+                                <div className="pt-4 border-t dark:border-gray-700">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        PO Normalization Factor (Divisor)
+                                    </label>
+                                    <input 
+                                        type="number" 
+                                        value={attainmentRules.po_calculation.normalization_factor} 
+                                        onChange={e => updateRule('po_calculation', 'normalization_factor', e.target.value)}
+                                        className="block w-32 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white" 
                                     />
                                 </div>
                             </CardContent>
@@ -474,94 +502,98 @@ const AdminConfigurationPage = () => {
                     </div>
 
                     {/* --- 2. INDIRECT TOOLS CONFIGURATION --- */}
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white mt-8">Indirect Assessment Tools</h2>
-                    <Card>
-                        <CardContent className="p-0">
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                    <thead className="bg-gray-100 dark:bg-gray-800">
-                                        <tr>
-                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Tool Name</th>
-                                            <th className="px-6 py-3 text-left text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Weightage (%)</th>
-                                            <th className="px-6 py-3 text-right text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                        {indirectTools.map((tool) => (
-                                            <tr key={tool.id}>
-                                                <td className="px-6 py-4">
-                                                    <input 
-                                                        value={tool.name}
-                                                        onChange={(e) => handleToolChange(tool.id, 'name', e.target.value)}
-                                                        className="border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-primary-500 text-sm font-bold text-gray-900 dark:text-white w-full dark:bg-gray-700 dark:border-gray-600"
-                                                    />
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <input 
-                                                        type="number"
-                                                        value={tool.weight}
-                                                        onChange={(e) => handleToolChange(tool.id, 'weight', e.target.value)}
-                                                        className="w-24 rounded border-gray-300 text-sm py-1 font-bold text-gray-900 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-center"
-                                                    />
-                                                </td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Fixed</span>
-                                                </td>
+                    <div className="mt-8">
+                        <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Indirect Assessment Tools</h2>
+                        <Card>
+                            <CardContent className="p-0">
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                        <thead className="bg-gray-100 dark:bg-gray-800">
+                                            <tr>
+                                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Tool Name</th>
+                                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Weightage (%)</th>
+                                                <th className="px-6 py-3 text-right text-xs font-bold text-gray-800 uppercase dark:text-gray-200">Action</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </CardContent>
-                    </Card>
+                                        </thead>
+                                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                            {indirectTools.map((tool) => (
+                                                <tr key={tool.id}>
+                                                    <td className="px-6 py-4">
+                                                        <input 
+                                                            value={tool.name}
+                                                            onChange={(e) => handleToolChange(tool.id, 'name', e.target.value)}
+                                                            className="border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-primary-500 text-sm font-bold text-gray-900 dark:text-white w-full dark:bg-gray-700 dark:border-gray-600"
+                                                        />
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <input 
+                                                            type="number"
+                                                            value={tool.weight}
+                                                            onChange={(e) => handleToolChange(tool.id, 'weight', e.target.value)}
+                                                            className="w-24 rounded border-gray-300 text-sm py-1 font-bold text-gray-900 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-center"
+                                                        />
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right">
+                                                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Fixed</span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
                 </>
             ) : (
-                <div className="text-center py-20 bg-gray-50 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+                <div className="text-center py-20 bg-gray-50 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 mt-6">
                     <Icons.Settings className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                     <h3 className="text-lg font-bold text-gray-500">No Scheme Selected</h3>
                     <p className="text-gray-400 mt-1">Select an existing scheme or create a new one to configure settings.</p>
                 </div>
             )}
             
-            {/* --- 3. OUTCOME DEFINITIONS (Shared Across Schemes) --- */}
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mt-8">Outcome Definitions</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card>
-                    <CardHeader>
-                        <div className="flex justify-between items-center">
-                            <CardTitle>Program Outcomes (POs)</CardTitle>
-                            <a href="/admin/outcomes" className="text-xs text-primary-600 hover:underline dark:text-primary-400">Manage</a>
-                        </div>
-                    </CardHeader>
-                    <CardContent className="h-64 overflow-y-auto border-t border-gray-200 dark:border-gray-700 pt-2 custom-scrollbar">
-                        <ul className="space-y-2">
-                            {pos.length > 0 ? pos.map(po => (
-                                <li key={po.id} className="text-sm p-3 bg-gray-50 dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600 flex gap-2">
-                                    <span className="font-extrabold text-gray-900 dark:text-white w-12 shrink-0">{po.id}</span>
-                                    <span className="text-gray-800 font-medium dark:text-gray-200 truncate">{po.description}</span>
-                                </li>
-                            )) : <li className="text-sm text-gray-500 p-2">No POs defined.</li>}
-                        </ul>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader>
-                        <div className="flex justify-between items-center">
-                            <CardTitle>Program Specific Outcomes (PSOs)</CardTitle>
-                            <a href="/admin/outcomes" className="text-xs text-primary-600 hover:underline dark:text-primary-400">Manage</a>
-                        </div>
-                    </CardHeader>
-                    <CardContent className="h-64 overflow-y-auto border-t border-gray-200 dark:border-gray-700 pt-2 custom-scrollbar">
-                        <ul className="space-y-2">
-                            {psos.length > 0 ? psos.map(pso => (
-                                <li key={pso.id} className="text-sm p-3 bg-gray-50 dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600 flex gap-2">
-                                    <span className="font-extrabold text-gray-900 dark:text-white w-12 shrink-0">{pso.id}</span>
-                                    <span className="text-gray-800 font-medium dark:text-gray-200 truncate">{pso.description}</span>
-                                </li>
-                            )) : <li className="text-sm text-gray-500 p-2">No PSOs defined.</li>}
-                        </ul>
-                    </CardContent>
-                </Card>
+            {/* --- 3. OUTCOME DEFINITIONS --- */}
+            <div className="mt-8">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Outcome Definitions</h2>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card>
+                        <CardHeader>
+                            <div className="flex justify-between items-center">
+                                <CardTitle>Program Outcomes (POs)</CardTitle>
+                                <a href="/admin/outcomes" className="text-xs text-primary-600 hover:underline dark:text-primary-400">Manage</a>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="h-64 overflow-y-auto border-t border-gray-200 dark:border-gray-700 pt-2 custom-scrollbar">
+                            <ul className="space-y-2">
+                                {pos.length > 0 ? pos.map(po => (
+                                    <li key={po.id} className="text-sm p-3 bg-gray-50 dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600 flex gap-2">
+                                        <span className="font-extrabold text-gray-900 dark:text-white w-12 shrink-0">{po.id}</span>
+                                        <span className="text-gray-800 font-medium dark:text-gray-200 truncate">{po.description}</span>
+                                    </li>
+                                )) : <li className="text-sm text-gray-500 p-2">No POs defined.</li>}
+                            </ul>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <div className="flex justify-between items-center">
+                                <CardTitle>Program Specific Outcomes (PSOs)</CardTitle>
+                                <a href="/admin/outcomes" className="text-xs text-primary-600 hover:underline dark:text-primary-400">Manage</a>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="h-64 overflow-y-auto border-t border-gray-200 dark:border-gray-700 pt-2 custom-scrollbar">
+                            <ul className="space-y-2">
+                                {psos.length > 0 ? psos.map(pso => (
+                                    <li key={pso.id} className="text-sm p-3 bg-gray-50 dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600 flex gap-2">
+                                        <span className="font-extrabold text-gray-900 dark:text-white w-12 shrink-0">{pso.id}</span>
+                                        <span className="text-gray-800 font-medium dark:text-gray-200 truncate">{pso.description}</span>
+                                    </li>
+                                )) : <li className="text-sm text-gray-500 p-2">No PSOs defined.</li>}
+                            </ul>
+                        </CardContent>
+                    </Card>
+                </div>
             </div>
         </div>
     );

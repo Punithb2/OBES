@@ -68,13 +68,18 @@ const AdminManagement = () => {
     const fetchData = async () => {
         try {
             setLoading(true);
-            // FIXED: Added trailing slashes
             const [usersRes, deptRes] = await Promise.all([
-                api.get('/users/?role=admin'), // Slash goes before query param
+                api.get('/users/?role=admin'), 
                 api.get('/departments/')
             ]);
-            setAdmins(usersRes.data);
-            setDepartments(deptRes.data);
+            
+            // FIX: Safely extract data handling Django's paginated responses
+            const fetchedAdmins = usersRes.data.results || usersRes.data;
+            const fetchedDepts = deptRes.data.results || deptRes.data;
+
+            setAdmins(Array.isArray(fetchedAdmins) ? fetchedAdmins : []);
+            setDepartments(Array.isArray(fetchedDepts) ? fetchedDepts : []);
+
         } catch (error) {
             console.error("Failed to load data", error);
         } finally {
@@ -96,23 +101,21 @@ const AdminManagement = () => {
         
         try {
             if (modal.admin) {
-                // FIXED: Added trailing slash
                 await api.patch(`/users/${modal.admin.id}/`, payload);
             } else {
-                // FIXED: Added trailing slash
                 await api.post('/users/', { ...payload, password: 'password123' }); // Set default password
             }
             setModal({ isOpen: false, admin: null });
             fetchData();
         } catch (error) {
             console.error("Failed to save admin", error);
+            alert("Failed to save admin. The email might already exist.");
         }
     };
 
     const handleDelete = async (id) => {
         if(window.confirm("Delete this admin?")) {
             try { 
-                // FIXED: Added trailing slash
                 await api.delete(`/users/${id}/`); 
                 fetchData(); 
             } 
@@ -120,7 +123,7 @@ const AdminManagement = () => {
         }
     };
 
-    const getDeptName = (id) => departments.find(d => d.id === id)?.name || 'Unknown';
+    const getDeptName = (id) => departments.find(d => String(d.id) === String(id))?.name || 'Unknown';
 
     return (
         <div className="p-6">
@@ -142,30 +145,46 @@ const AdminManagement = () => {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    {loading ? <div className="text-center py-8">Loading...</div> : (
-                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                            <thead className="bg-gray-50 dark:bg-gray-700/50">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Name</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Email</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Department</th>
-                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                {admins.map(admin => (
-                                    <tr key={admin.id}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{admin.display_name || admin.username}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{admin.email}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{getDeptName(admin.department)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                            <button onClick={() => setModal({ isOpen: true, admin })} className="text-primary-600 hover:text-primary-800 dark:text-primary-400 mr-4">Edit</button>
-                                            <button onClick={() => handleDelete(admin.id)} className="text-red-600 hover:text-red-800 dark:text-red-400">Delete</button>
-                                        </td>
+                    {loading ? <div className="text-center py-8 text-gray-500">Loading...</div> : (
+                        <div className="overflow-x-auto border dark:border-gray-700 rounded-lg">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                <thead className="bg-gray-50 dark:bg-gray-700/50">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Name</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Email</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Department</th>
+                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                    {admins.length === 0 ? (
+                                        <tr>
+                                            <td colSpan="4" className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                                                No admins found. Click "Add Admin" to create one.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        admins.map(admin => (
+                                            <tr key={admin.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                                                    {admin.display_name || admin.username}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                                    {admin.email}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                                    {getDeptName(admin.department)}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                    <button onClick={() => setModal({ isOpen: true, admin })} className="text-primary-600 hover:text-primary-800 dark:text-primary-400 mr-4">Edit</button>
+                                                    <button onClick={() => handleDelete(admin.id)} className="text-red-600 hover:text-red-800 dark:text-red-400">Delete</button>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </CardContent>
             </Card>

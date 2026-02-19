@@ -70,9 +70,12 @@ const DepartmentManagement = () => {
     const fetchDepartments = async () => {
         try {
             setLoading(true);
-            // FIXED: Added trailing slash
             const res = await api.get('/departments/');
-            setDepartments(res.data);
+            
+            // FIX: Safely extract paginated results
+            const fetchedDepts = res.data.results || res.data;
+            setDepartments(Array.isArray(fetchedDepts) ? fetchedDepts : []);
+            
         } catch (error) {
             console.error("Failed to fetch departments", error);
         } finally {
@@ -85,10 +88,8 @@ const DepartmentManagement = () => {
     const handleSave = async (data) => {
         try {
             if (modal.dept) {
-                // FIXED: Added trailing slash
                 await api.patch(`/departments/${modal.dept.id}/`, data);
             } else {
-                // FIXED: Added trailing slash
                 await api.post('/departments/', data);
             }
             setModal({ isOpen: false, dept: null });
@@ -102,7 +103,6 @@ const DepartmentManagement = () => {
     const handleDelete = async (id) => {
         if(window.confirm("Delete this department? Ensure no users/courses are assigned to it first.")) {
             try {
-                // FIXED: Added trailing slash
                 await api.delete(`/departments/${id}/`);
                 fetchDepartments();
             } catch (error) { console.error(error); }
@@ -149,6 +149,13 @@ const DepartmentManagement = () => {
                                         </td>
                                     </tr>
                                 ))}
+                                {departments.length === 0 && (
+                                     <tr>
+                                         <td colSpan="3" className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                                             No departments found.
+                                         </td>
+                                     </tr>
+                                )}
                             </tbody>
                         </table>
                     )}
