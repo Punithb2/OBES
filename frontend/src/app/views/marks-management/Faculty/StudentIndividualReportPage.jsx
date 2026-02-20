@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
-import { Loader2, User, BookOpen, Printer } from 'lucide-react';
+import { Loader2, User, BookOpen, Download } from 'lucide-react'; // Changed Printer to Download
 import { useLocation } from 'react-router-dom'; 
 import {
   Chart as ChartJS,
@@ -14,6 +14,8 @@ import {
   Legend
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
+import html2canvas from 'html2canvas'; // NEW: For PDF
+import jsPDF from 'jspdf';             // NEW: For PDF
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -21,6 +23,7 @@ const StudentIndividualReportPage = () => {
     const { user } = useAuth();
     const location = useLocation(); 
     const [loading, setLoading] = useState(true);
+    const [exporting, setExporting] = useState(false); // State for PDF generation
 
     // Data States
     const [courses, setCourses] = useState([]);
@@ -56,7 +59,6 @@ const StudentIndividualReportPage = () => {
 
                 setCourses(myCourses);
                 
-                // FIX: Use the correct state setter names
                 setAllStudents(Array.isArray(fetchedStudents) ? fetchedStudents : []);
                 setAllMarks(Array.isArray(fetchedMarks) ? fetchedMarks : []);
 
@@ -81,7 +83,7 @@ const StudentIndividualReportPage = () => {
         return courses.filter(c => String(c.assigned_faculty) === String(user.id));
     }, [user, courses]);
 
-    // 3. Filter Students for Course (FIXED WITH STRING MATCHING)
+    // 3. Filter Students for Course
     const courseStudents = useMemo(() => {
         if (!selectedCourseId) return [];
         return allStudents.filter(s => 
@@ -202,16 +204,48 @@ const StudentIndividualReportPage = () => {
         };
     }, [reportData]);
 
-    const handlePrint = () => {
-        window.print();
+    // --- NEW: EXPORT TO PDF FUNCTION ---
+    const handleExportToPDF = async () => {
+        const element = document.getElementById('individual-report'); 
+        if (!element) return;
+
+        setExporting(true);
+        try {
+            // Temporarily adjust styles for PDF capture
+            const originalBg = element.style.backgroundColor;
+            element.style.backgroundColor = '#ffffff'; 
+
+            const canvas = await html2canvas(element, { 
+                scale: 2, 
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff'
+            });
+            
+            element.style.backgroundColor = originalBg;
+
+            const imgData = canvas.toDataURL('image/png');
+            
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+            
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            pdf.save(`${selectedStudent.usn}_${selectedCourse.code}_Report.pdf`);
+        } catch (error) {
+            console.error("Error generating PDF:", error);
+            alert("Failed to generate PDF. Please try again.");
+        } finally {
+            setExporting(false);
+        }
     };
 
     if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
 
     return (
-        <div className="space-y-6 print:space-y-4">
+        <div className="space-y-6">
             {/* Controls */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center print:hidden">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
                 <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Individual Student Report</h1>
                 
                 <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
@@ -222,6 +256,7 @@ const StudentIndividualReportPage = () => {
                             setSelectedStudentId(''); 
                         }}
                         className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        disabled={exporting}
                     >
                         {assignedCourses.map(c => <option key={c.id} value={c.id}>{c.code}</option>)}
                     </select>
@@ -230,25 +265,31 @@ const StudentIndividualReportPage = () => {
                         value={selectedStudentId}
                         onChange={(e) => setSelectedStudentId(e.target.value)}
                         className="rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:w-64"
-                        disabled={!courseStudents.length}
+                        disabled={!courseStudents.length || exporting}
                     >
                         {courseStudents.map(s => <option key={s.id} value={s.id}>{s.usn} - {s.name}</option>)}
                         {!courseStudents.length && <option>No students</option>}
                     </select>
 
                     <button 
-                        onClick={handlePrint}
-                        className="flex items-center justify-center px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-900 transition-colors"
+                        onClick={handleExportToPDF}
+                        disabled={!selectedCourse || !selectedStudent || !reportData || exporting}
+                        className="flex items-center justify-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors font-medium shadow-sm disabled:opacity-50 whitespace-nowrap"
+                        title="Export Report to PDF"
                     >
-                        <Printer className="w-4 h-4 mr-2" /> Print
+                        {exporting ? <Loader2 className="w-4 h-4 sm:mr-2 animate-spin" /> : <Download className="w-4 h-4 sm:mr-2" />}
+                        <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export PDF'}</span>
                     </button>
                 </div>
             </div>
 
             {selectedCourse && selectedStudent && reportData ? (
-                <div className="space-y-6">
+                
+                /* WRAP THE REPORT CONTENT IN THIS ID FOR PDF CAPTURE */
+                <div id="individual-report" className="space-y-6 bg-transparent dark:bg-gray-900 pb-4">
+                    
                     {/* Header Info */}
-                    <Card className="print:shadow-none print:border-gray-300">
+                    <Card className="shadow-sm">
                         <CardContent className="pt-6">
                             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                                 <div className="flex items-center gap-4">
@@ -271,7 +312,7 @@ const StudentIndividualReportPage = () => {
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Assessment Table */}
                         <div className="lg:col-span-2">
-                            <Card className="h-full print:shadow-none print:border-gray-300">
+                            <Card className="h-full shadow-sm">
                                 <CardHeader>
                                     <CardTitle>Assessment Performance</CardTitle>
                                 </CardHeader>
@@ -312,7 +353,7 @@ const StudentIndividualReportPage = () => {
 
                         {/* Chart */}
                         <div className="lg:col-span-1">
-                            <Card className="h-full print:shadow-none print:border-gray-300">
+                            <Card className="h-full shadow-sm">
                                 <CardHeader>
                                     <CardTitle>CO Attainment Profile</CardTitle>
                                     <CardDescription>Performance percentage per CO.</CardDescription>

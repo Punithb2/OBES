@@ -2,17 +2,20 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Download } from 'lucide-react'; // Added Download Icon
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement
 } from 'chart.js';
 import { Bar, Pie } from 'react-chartjs-2';
+import html2canvas from 'html2canvas'; // NEW: For PDF Export
+import jsPDF from 'jspdf';             // NEW: For PDF Export
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
 const AttainmentReportPage = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false); // NEW: State for export loading
   
   // States
   const [courses, setCourses] = useState([]);
@@ -164,24 +167,82 @@ const AttainmentReportPage = () => {
       return { gradePieData, coBarData, poBarData };
   }, [reportData, gradeDistribution]);
 
+  // --- NEW: EXPORT TO PDF FUNCTION ---
+  const handleExportToPDF = async () => {
+    const element = document.getElementById('analytics-report'); 
+    if (!element) return;
+
+    setExporting(true);
+    try {
+        // Temporarily adjust styles for better PDF capture (especially dark mode)
+        const originalBg = element.style.backgroundColor;
+        element.style.backgroundColor = '#ffffff'; 
+
+        // Take a high-res snapshot of the element
+        const canvas = await html2canvas(element, { 
+            scale: 2, // 2x scale for crisp chart rendering 
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff'
+        });
+        
+        // Restore original style
+        element.style.backgroundColor = originalBg;
+
+        const imgData = canvas.toDataURL('image/png');
+        
+        // Create A4 PDF (Portrait, Millimeters)
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        // Calculate height to maintain aspect ratio
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        
+        // Add image to PDF and save
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+        pdf.save(`${selectedCourse?.code || 'Course'}_Analytics_Report.pdf`);
+    } catch (error) {
+        console.error("Error generating PDF:", error);
+        alert("Failed to generate PDF. Please try again.");
+    } finally {
+        setExporting(false);
+    }
+  };
+
 
   if (!user) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
-        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Course Analytics</h1>
+        <div>
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Course Analytics</h1>
+            <p className="text-gray-500 dark:text-gray-400 mt-1">Visual attainment and grade distribution.</p>
+        </div>
         
-        <select 
-          value={selectedCourseId}
-          onChange={(e) => setSelectedCourseId(e.target.value)}
-          className="block mt-4 sm:mt-0 w-full sm:w-72 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-        >
-          {courses.map(course => (
-            <option key={course.id} value={course.id}>{course.code} - {course.name}</option>
-          ))}
-          {courses.length === 0 && <option>No courses assigned</option>}
-        </select>
+        {/* Dropdown & Export Button */}
+        <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <select 
+            value={selectedCourseId}
+            onChange={(e) => setSelectedCourseId(e.target.value)}
+            className="block w-full sm:w-72 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            disabled={loading || exporting}
+            >
+            {courses.map(course => (
+                <option key={course.id} value={course.id}>{course.code} - {course.name}</option>
+            ))}
+            {courses.length === 0 && <option>No courses assigned</option>}
+            </select>
+
+            <button 
+                onClick={handleExportToPDF}
+                disabled={!selectedCourse || loading || exporting || !reportData}
+                className="flex items-center justify-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors font-medium shadow-sm disabled:opacity-50 whitespace-nowrap"
+                title="Export Dashboard to PDF"
+            >
+                {exporting ? <Loader2 className="w-4 h-4 sm:mr-2 animate-spin" /> : <Download className="w-4 h-4 sm:mr-2" />}
+                <span className="hidden sm:inline">{exporting ? 'Exporting...' : 'Export PDF'}</span>
+            </button>
+        </div>
       </div>
 
       {loading ? (
@@ -189,7 +250,10 @@ const AttainmentReportPage = () => {
               <Loader2 className="animate-spin h-8 w-8 text-primary-600" />
           </div>
       ) : selectedCourse && reportData && chartConfig ? (
-        <>
+        
+        /* WRAP THE ENTIRE DASHBOARD IN THIS ID FOR PDF CAPTURE */
+        <div id="analytics-report" className="space-y-6 bg-transparent dark:bg-gray-900 pb-4">
+          
           {/* Summary Cards */}
            <Card>
               <CardContent className="pt-6">
@@ -287,7 +351,8 @@ const AttainmentReportPage = () => {
               </div>
             </CardContent>
           </Card>
-        </>
+
+        </div>
       ) : (
         <Card>
           <CardContent>

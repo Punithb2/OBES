@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Download } from 'lucide-react';
+import * as XLSX from 'xlsx-js-style'; // Changed to xlsx-js-style for colors!
 
 const CoPoAttainmentPage = () => {
     const { user } = useAuth();
@@ -18,9 +19,9 @@ const CoPoAttainmentPage = () => {
     const [courseStudents, setCourseStudents] = useState([]);
     const [courseMarks, setCourseMarks] = useState([]);
     const [courseMatrix, setCourseMatrix] = useState({});
-    const [reportData, setReportData] = useState(null); // Data from new Python Backend
+    const [reportData, setReportData] = useState(null); 
 
-    // --- 1. INITIAL LOAD (Fetch base structure) ---
+    // --- 1. INITIAL LOAD ---
     useEffect(() => {
         const fetchBaseData = async () => {
             if (!user) return;
@@ -54,9 +55,9 @@ const CoPoAttainmentPage = () => {
         fetchBaseData();
     }, [user]);
 
-    const selectedCourse = useMemo(() => courses.find(c => c.id === selectedCourseId), [courses, selectedCourseId]);
+    const selectedCourse = useMemo(() => courses.find(c => String(c.id) === String(selectedCourseId)), [courses, selectedCourseId]);
 
-    // --- 2. FETCH SPECIFIC COURSE DATA (The "Slim-Down" Optimization) ---
+    // --- 2. FETCH SPECIFIC COURSE DATA ---
     useEffect(() => {
         const fetchCourseData = async () => {
             if (!selectedCourseId) return;
@@ -64,12 +65,11 @@ const CoPoAttainmentPage = () => {
             setReportData(null);
             
             try {
-                // Fetch filtered marks and backend calculations simultaneously
                 const [studentsRes, marksRes, matrixRes, reportRes] = await Promise.all([
                     api.get('/students/'),
-                    api.get(`/marks/?course=${selectedCourseId}`), // Strict Filtering
+                    api.get(`/marks/?course=${selectedCourseId}`),
                     api.get('/articulation-matrix/'),
-                    api.get(`/reports/course-attainment/${selectedCourseId}/`) // The Python Engine
+                    api.get(`/reports/course-attainment/${selectedCourseId}/`)
                 ]);
 
                 const allStudents = studentsRes.data.results || studentsRes.data;
@@ -78,7 +78,7 @@ const CoPoAttainmentPage = () => {
                 setCourseMarks(marksRes.data.results || marksRes.data);
                 
                 const allMatrices = matrixRes.data.results || matrixRes.data;
-                const specificMatrix = allMatrices.find(m => m.course === selectedCourseId);
+                const specificMatrix = allMatrices.find(m => String(m.course) === String(selectedCourseId));
                 setCourseMatrix(specificMatrix ? specificMatrix.matrix : {});
 
                 setReportData(reportRes.data);
@@ -97,7 +97,6 @@ const CoPoAttainmentPage = () => {
         if (!selectedCourse) return null;
 
         const settings = selectedCourse.scheme_details?.settings || {};
-        // Fallback to Phase 1 JSON schema standard
         const rules = settings.attainment_rules || settings; 
 
         let levelsDict = rules.attainment_levels || rules.levelThresholds || { level_3: 70, level_2: 60, level_1: 50 };
@@ -161,7 +160,7 @@ const CoPoAttainmentPage = () => {
         };
     }, [selectedCourse]);
 
-    // --- 4. CALCULATE RAW STUDENT MATRIX (Blazing fast because courseMarks is small) ---
+    // --- 4. CALCULATE RAW STUDENT MATRIX ---
     const data = useMemo(() => {
         if (!courseStudents.length || !courseConfig) return null;
 
@@ -173,7 +172,6 @@ const CoPoAttainmentPage = () => {
 
         const isStudentAbsent = (val) => ['AB', 'ABSENT', 'A', 'NA', '-'].includes(String(val || '').toUpperCase().trim());
 
-        // STRICT TOTAL CALCULATOR
         const getScoreTotal = (scores, parts) => {
             if (!scores) return 0;
             if (parts && parts.length > 0) {
@@ -190,7 +188,6 @@ const CoPoAttainmentPage = () => {
             }, 0);
         };
 
-        // ROBUST MATCHING HELPERS
         const normalize = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, ''); 
         const extractNumber = (str) => {
             const match = String(str).match(/(\d+)/);
@@ -206,7 +203,6 @@ const CoPoAttainmentPage = () => {
                 let scores = markRecord?.scores || {};
                 let isOverridden = false;
 
-                // --- ROBUST IMPROVEMENT CHECK ---
                 const improvementRecord = studentMarks.find(m => {
                     const targetNew = m.improvement_test_for;
                     const targetOld = m.scores?._improvementTarget;
@@ -216,10 +212,8 @@ const CoPoAttainmentPage = () => {
                     const target = targetNew || targetOld;
                     const currentTitle = assessment.title;
 
-                    // 1. Strict Normalization Match
                     if (normalize(target) === normalize(currentTitle)) return true;
 
-                    // 2. Number + Keyword Match
                     const tNorm = normalize(target);
                     const cNorm = normalize(currentTitle);
                     const isInternal = (s) => s.includes('internal') || s.includes('ia') || s.includes('test');
@@ -242,7 +236,6 @@ const CoPoAttainmentPage = () => {
                     }
                 }
 
-                // --- Process Final Scores into Table Cells ---
                 let currentTotal = 0;
                 const parts = assessment.parts.map(part => {
                     let rawVal = scores[part.co];
@@ -266,7 +259,6 @@ const CoPoAttainmentPage = () => {
                 row.assessments[assessment.id] = { total: currentTotal, parts, isOverridden };
             });
 
-            // SEE Processing
             const seeRecord = studentMarks.find(m => m.assessment_name === 'SEE' || m.assessment_name === 'Semester End Exam');
             let seeObtained = 0;
             let seeAbsent = false;
@@ -313,13 +305,12 @@ const CoPoAttainmentPage = () => {
         return s;
     }, [data, courseConfig]);
 
-    // --- 6. BUILD EXPECTED/ACTUAL PO GRID (Using Backend Data!) ---
+    // --- 6. BUILD EXPECTED/ACTUAL PO GRID ---
     const poAttainmentGrid = useMemo(() => {
         if (!reportData || !selectedCourse || !courseMatrix) return null;
         
         const outcomes = [...pos, ...psos]; 
         
-        // Build "Expected" using the Articulation Matrix mappings
         const expectedRows = reportData.co_attainment.map(coData => {
             const outcomeValues = {};
             outcomes.forEach(outcome => {
@@ -329,7 +320,6 @@ const CoPoAttainmentPage = () => {
             return { co: coData.co, values: outcomeValues };
         });
 
-        // Averages for Expected
         const expectedAvg = {};
         outcomes.forEach(outcome => {
             let sum = 0, count = 0;
@@ -339,8 +329,7 @@ const CoPoAttainmentPage = () => {
             expectedAvg[outcome.id] = count > 0 ? (sum / count).toFixed(2) : '-';
         });
 
-        // Build "Actual" by multiplying mapping by Backend Score Index
-        const normFactor = reportData.scheme_used ? 3 : 3; // From Phase 1 rules
+        const normFactor = reportData.scheme_used ? 3 : 3; 
         const actualRows = expectedRows.map((row) => {
              const backendCoData = reportData.co_attainment.find(c => c.co === row.co);
              const coLevel = backendCoData ? backendCoData.score_index : 0;
@@ -356,7 +345,6 @@ const CoPoAttainmentPage = () => {
              return { co: row.co, values: actualValues };
         });
 
-        // Averages for Actual
         const actualAvg = {};
         outcomes.forEach(outcome => {
              let sum = 0, count = 0;
@@ -368,6 +356,294 @@ const CoPoAttainmentPage = () => {
 
         return { outcomes, expectedRows, expectedAvg, actualRows, actualAvg };
     }, [reportData, selectedCourse, courseMatrix, pos, psos]);
+
+    // --- 7. EXPORT TO EXCEL (WITH STYLING) ---
+    const handleExportToExcel = () => {
+        if (!selectedCourse || !reportData || !data || !courseConfig) {
+            alert("No complete data available to export!");
+            return;
+        }
+
+        const workbook = XLSX.utils.book_new();
+
+        // -----------------------------------------------------
+        // SHEET 1: STUDENT MATRIX (WITH COLORS & BORDERS)
+        // -----------------------------------------------------
+        
+        // Define Styles
+        const headerStyle = {
+            font: { bold: true, color: { rgb: "000000" }, sz: 11 },
+            fill: { fgColor: { rgb: "E2E8F0" } }, // Tailwind gray-200
+            alignment: { horizontal: "center", vertical: "center", wrapText: true },
+            border: {
+                top: { style: "thin", color: { rgb: "94A3B8" } },
+                bottom: { style: "thin", color: { rgb: "94A3B8" } },
+                left: { style: "thin", color: { rgb: "94A3B8" } },
+                right: { style: "thin", color: { rgb: "94A3B8" } }
+            }
+        };
+
+        const greenHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "DCFCE7" } } }; // Tailwind green-100
+        const blueHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "DBEAFE" } } }; // Tailwind blue-100
+        const yellowHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "FEF08A" } } }; // Tailwind yellow-200
+        const orangeHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "FFEDD5" } } }; // Tailwind orange-100
+
+        const dataStyle = {
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+                top: { style: "thin", color: { rgb: "E2E8F0" } },
+                bottom: { style: "thin", color: { rgb: "E2E8F0" } },
+                left: { style: "thin", color: { rgb: "E2E8F0" } },
+                right: { style: "thin", color: { rgb: "E2E8F0" } }
+            }
+        };
+
+        const footerStyle = {
+            font: { bold: true, color: { rgb: "FFFFFF" } },
+            fill: { fgColor: { rgb: "8B5A2B" } }, // The brown color from your UI
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+                top: { style: "medium", color: { rgb: "000000" } },
+                bottom: { style: "thin", color: { rgb: "E2E8F0" } },
+                left: { style: "thin", color: { rgb: "E2E8F0" } },
+                right: { style: "thin", color: { rgb: "E2E8F0" } }
+            }
+        };
+
+        // Construct headers dynamically to match the 3-row header of the UI
+        let topHeaderRow = ["Sl.No.", "USN", "Name"];
+        let midHeaderRow = ["", "", ""];
+        let bottomHeaderRow = ["", "", ""];
+
+        courseConfig.assessments.forEach(assessment => {
+            assessment.parts.forEach(part => {
+                topHeaderRow.push(`${assessment.title}`);
+                midHeaderRow.push(`Internal`);
+                bottomHeaderRow.push(`${part.co}`);
+                
+                topHeaderRow.push("");
+                midHeaderRow.push("");
+                bottomHeaderRow.push("Lvl");
+
+                topHeaderRow.push("");
+                midHeaderRow.push("");
+                bottomHeaderRow.push("Met?");
+            });
+            topHeaderRow.push("");
+            midHeaderRow.push("");
+            bottomHeaderRow.push("Total");
+        });
+
+        // SEE Headers
+        topHeaderRow.push("SEE", "", "");
+        midHeaderRow.push("", "", "");
+        bottomHeaderRow.push("Obt", "Lvl", "Met?");
+
+        const aoaData = [topHeaderRow, midHeaderRow, bottomHeaderRow];
+
+        // Construct Data Rows
+        data.forEach((row, idx) => {
+            let rowData = [idx + 1, row.student.usn, row.student.name];
+
+            courseConfig.assessments.forEach(assessment => {
+                const aData = row.assessments[assessment.id];
+                aData.parts.forEach(part => {
+                    rowData.push(part.isAbsent ? 'AB' : part.obtained);
+                    rowData.push(part.isAbsent ? '-' : part.score);
+                    rowData.push(part.isAbsent ? '-' : (part.targetMet ? 'Y' : 'N'));
+                });
+                rowData.push(aData.total);
+            });
+
+            rowData.push(row.see.isAbsent ? 'AB' : row.see.obtained);
+            rowData.push(row.see.isAbsent ? '-' : row.see.score);
+            rowData.push(row.see.isAbsent ? '-' : (row.see.targetMet ? 'Y' : 'N'));
+
+            aoaData.push(rowData);
+        });
+
+        // Construct Summary Rows
+        if (summary) {
+            aoaData.push([]); // Empty row
+            const labels = [
+                { key: 'avgMarks', title: "Class Average" }, 
+                { key: 'absentCount', title: "No. of Absents (AB)" }, 
+                { key: 'yCount', title: "No. of Students >= Target" }, 
+                { key: 'percentage', title: "% Above Target" }, 
+                { key: 'level', title: "Attainment Level" }
+            ];
+
+            labels.forEach(labelRow => {
+                let sumRow = ["", "", labelRow.title];
+
+                courseConfig.assessments.forEach(assessment => {
+                    assessment.parts.forEach((part, pIdx) => {
+                        const stats = summary.assessments[assessment.id].parts[pIdx];
+                        const totalStudents = data.length || 1;
+                        const attempts = totalStudents - stats.absentCount;
+                        const validAttempts = attempts > 0 ? attempts : 1;
+                        const percent = (stats.yCount / validAttempts) * 100;
+
+                        let val = '';
+                        if (labelRow.key === 'avgMarks') val = (stats.totalMarks / validAttempts).toFixed(1);
+                        if (labelRow.key === 'absentCount') val = stats.absentCount;
+                        if (labelRow.key === 'yCount') val = stats.yCount;
+                        if (labelRow.key === 'percentage') val = percent.toFixed(1) + '%';
+                        if (labelRow.key === 'level') { 
+                            const match = courseConfig.sortedLevels.find(l => percent >= l.threshold); 
+                            val = match ? match.level : 0; 
+                        }
+
+                        sumRow.push(val, "", "");
+                    });
+                    sumRow.push(""); // Skip Total column
+                });
+
+                // SEE Summary logic
+                const seeTotalStudents = data.length || 1; 
+                const seeAttempts = seeTotalStudents - summary.see.absentCount; 
+                const seeValidAttempts = seeAttempts > 0 ? seeAttempts : 1; 
+                const seePercent = (summary.see.yCount / seeValidAttempts) * 100;
+
+                if (labelRow.key === 'avgMarks') sumRow.push((summary.see.totalMarks / seeValidAttempts).toFixed(1));
+                else if (labelRow.key === 'absentCount') sumRow.push(summary.see.absentCount);
+                else if (labelRow.key === 'level') { 
+                    const match = courseConfig.sortedLevels.find(l => seePercent >= l.threshold); 
+                    sumRow.push(match ? match.level : 0); 
+                }
+                else if (labelRow.key === 'yCount') sumRow.push(summary.see.yCount);
+                else if (labelRow.key === 'percentage') sumRow.push(seePercent.toFixed(1) + '%');
+                else sumRow.push("");
+
+                sumRow.push("", ""); // Fill remaining columns
+                aoaData.push(sumRow);
+            });
+        }
+
+        const wsStudent = XLSX.utils.aoa_to_sheet(aoaData);
+
+        // Apply Styles to Sheet 1
+        for (let R = 0; R < aoaData.length; ++R) {
+            for (let C = 0; C < aoaData[R].length; ++C) {
+                const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                if (!wsStudent[cellRef]) continue;
+
+                if (R < 3) {
+                    // Header rows coloring logic to match UI
+                    let style = headerStyle;
+                    if (R === 2) {
+                        if (aoaData[R][C].startsWith('CO')) style = greenHeaderStyle;
+                        if (aoaData[R][C] === 'Lvl' || aoaData[R][C] === 'Tot') style = blueHeaderStyle;
+                        if (aoaData[R][C] === 'Met?') style = yellowHeaderStyle;
+                        if (aoaData[R][C] === 'Obt') style = orangeHeaderStyle;
+                    }
+                    wsStudent[cellRef].s = style;
+                } else if (R > data.length + 3) {
+                    // Footer rows
+                    wsStudent[cellRef].s = footerStyle;
+                } else {
+                    // Normal data rows
+                    wsStudent[cellRef].s = dataStyle;
+                }
+            }
+        }
+
+        // Adjust column widths
+        const wscols = [{ wch: 6 }, { wch: 15 }, { wch: 30 }];
+        for (let i = 3; i < aoaData[0].length; i++) wscols.push({ wch: 8 });
+        wsStudent['!cols'] = wscols;
+
+        // Merge cells for headers
+        const merges = [];
+        merges.push({ s: { r: 0, c: 0 }, e: { r: 2, c: 0 } }); // Sl.No
+        merges.push({ s: { r: 0, c: 1 }, e: { r: 2, c: 1 } }); // USN
+        merges.push({ s: { r: 0, c: 2 }, e: { r: 2, c: 2 } }); // Name
+        wsStudent['!merges'] = merges;
+
+        XLSX.utils.book_append_sheet(workbook, wsStudent, "Student Matrix");
+
+        // -----------------------------------------------------
+        // SHEET 2: CO ATTAINMENT SUMMARY (STYLED)
+        // -----------------------------------------------------
+        const coHeaders = ["Course Outcome (CO)", "CIE Avg Level", "SEE Avg Level", "Direct Attainment (DA)", "Indirect Attainment (IA)", "Final Score Index"];
+        const coDataArr = [coHeaders];
+
+        reportData.co_attainment.forEach(row => {
+            const courseCo = (selectedCourse.cos || []).find(c => c.id === row.co);
+            coDataArr.push([
+                `${row.co} - ${courseCo ? courseCo.description : ''}`,
+                row.cie_level.toFixed(2),
+                row.see_level.toFixed(2),
+                row.direct_attainment.toFixed(2),
+                row.indirect_attainment.toFixed(2),
+                row.score_index.toFixed(2)
+            ]);
+        });
+
+        const wsCO = XLSX.utils.aoa_to_sheet(coDataArr);
+        
+        // Style CO Sheet
+        for (let R = 0; R < coDataArr.length; ++R) {
+            for (let C = 0; C < coDataArr[R].length; ++C) {
+                const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                if (!wsCO[cellRef]) continue;
+
+                if (R === 0) {
+                    wsCO[cellRef].s = headerStyle;
+                    if (C === 5) wsCO[cellRef].s = greenHeaderStyle; // Highlight Final Score Index
+                } else {
+                    wsCO[cellRef].s = dataStyle;
+                }
+            }
+        }
+        wsCO['!cols'] = [{ wch: 60 }, { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 20 }];
+        XLSX.utils.book_append_sheet(workbook, wsCO, "CO Attainment");
+
+        // -----------------------------------------------------
+        // SHEET 3: ACTUAL PO ATTAINMENT (STYLED)
+        // -----------------------------------------------------
+        if (poAttainmentGrid && poAttainmentGrid.actualRows) {
+            const poHeadersRow = ["CO", ...poAttainmentGrid.outcomes.map(o => o.id)];
+            const poDataArr = [poHeadersRow];
+
+            poAttainmentGrid.actualRows.forEach(row => {
+                const rowData = [row.co];
+                poAttainmentGrid.outcomes.forEach(o => {
+                    rowData.push(row.values[o.id]);
+                });
+                poDataArr.push(rowData);
+            });
+            
+            const avgRowData = ["AVG"];
+            poAttainmentGrid.outcomes.forEach(o => {
+                avgRowData.push(poAttainmentGrid.actualAvg[o.id]);
+            });
+            poDataArr.push(avgRowData);
+
+            const wsPO = XLSX.utils.aoa_to_sheet(poDataArr);
+
+            // Style PO Sheet
+            for (let R = 0; R < poDataArr.length; ++R) {
+                for (let C = 0; C < poDataArr[R].length; ++C) {
+                    const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                    if (!wsPO[cellRef]) continue;
+
+                    if (R === 0) {
+                        wsPO[cellRef].s = blueHeaderStyle;
+                    } else if (R === poDataArr.length - 1) {
+                        wsPO[cellRef].s = { ...footerStyle, fill: { fgColor: { rgb: "E2E8F0" } }, font: { bold: true, color: { rgb: "000000" } } };
+                    } else {
+                        wsPO[cellRef].s = dataStyle;
+                    }
+                }
+            }
+            wsPO['!cols'] = [{ wch: 15 }, ...poAttainmentGrid.outcomes.map(() => ({ wch: 10 }))];
+            XLSX.utils.book_append_sheet(workbook, wsPO, "Actual PO Attainment");
+        }
+
+        // Trigger Download
+        XLSX.writeFile(workbook, `${selectedCourse.code}_Full_Attainment_Report.xlsx`);
+    };
 
     if (loading && !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
     if (!user) return null;
@@ -465,10 +741,24 @@ const CoPoAttainmentPage = () => {
                         <p className="text-gray-500 dark:text-gray-400">Scheme: <span className="font-bold text-primary-600 dark:text-primary-400">{courseConfig?.schemeName || 'Loading...'}</span></p>
                     </div>
                 </div>
-                <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} className="block w-full mt-4 sm:mt-0 sm:w-96 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-                    {courses.map(course => <option key={course.id} value={course.id}>{course.code} - {course.name}</option>)}
-                    {courses.length === 0 && <option>No courses assigned</option>}
-                </select>
+                
+                {/* Dropdown & Export Button Container */}
+                <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                    <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} className="block w-full sm:w-80 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white" disabled={loading}>
+                        {courses.map(course => <option key={course.id} value={course.id}>{course.code} - {course.name}</option>)}
+                        {courses.length === 0 && <option>No courses assigned</option>}
+                    </select>
+
+                    <button 
+                        onClick={handleExportToExcel}
+                        disabled={!selectedCourse || !reportData || !data || loading}
+                        className="flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium shadow-sm disabled:opacity-50 whitespace-nowrap"
+                        title="Export Attainment Report to Excel"
+                    >
+                        <Download className="w-4 h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Export XLSX</span>
+                    </button>
+                </div>
             </div>
             
             {loading && <div className="text-sm text-gray-500 flex items-center"><Loader2 className="w-4 h-4 mr-2 animate-spin"/> Refreshing Matrix...</div>}

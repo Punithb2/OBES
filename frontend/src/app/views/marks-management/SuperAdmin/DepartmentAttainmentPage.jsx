@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
+import { Card, CardContent } from '../shared/Card';
 import api from '../../../services/api';
-import { Loader2, Filter, Building2, Search } from 'lucide-react';
+import { Loader2, Filter, Building2, Search, Download } from 'lucide-react'; // Added Download Icon
+import * as XLSX from 'xlsx-js-style'; // NEW: For Styled Excel Export
 
 const DepartmentAttainmentPage = () => {
     const [loading, setLoading] = useState(false);
@@ -214,11 +215,11 @@ const DepartmentAttainmentPage = () => {
             { label: 'Alumni Survey', data: alumniData },
             { label: 'Indirect Attainment (Avg of Surveys) [B]', data: indirectAttainment, bold: true, bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
             { 
-                label: `weighted Direct [C = A * ${(wDirectProgram * 100).toFixed(0)}%]`, 
+                label: `Weighted Direct [C = A * ${(wDirectProgram * 100).toFixed(0)}%]`, 
                 data: rowC 
             },
             { 
-                label: `weighted Indirect [D = B * ${(wIndirectProgram * 100).toFixed(0)}%]`, 
+                label: `Weighted Indirect [D = B * ${(wIndirectProgram * 100).toFixed(0)}%]`, 
                 data: rowD 
             },
             { label: 'Total Attainment [C + D]', data: totalRow, bold: true, bg: 'bg-green-50 dark:bg-green-900/20' },
@@ -227,6 +228,121 @@ const DepartmentAttainmentPage = () => {
         return { courseRows, summaryRows };
 
     }, [selectedDeptId, courses, outcomes, matrix, surveyData, schemes, selectedSchemeId, courseReports]);
+
+    // --- 4. EXPORT TO EXCEL ---
+    const handleExportToExcel = () => {
+        if (!calculateData || calculateData.courseRows.length === 0) {
+            alert("No data available to export.");
+            return;
+        }
+
+        const selectedDept = departments.find(d => String(d.id) === String(selectedDeptId));
+        const deptName = selectedDept ? selectedDept.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Department';
+
+        // Define Styles
+        const headerStyle = {
+            font: { bold: true, color: { rgb: "000000" }, sz: 11 },
+            fill: { fgColor: { rgb: "E2E8F0" } }, // Gray-200
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+                top: { style: "thin", color: { rgb: "94A3B8" } },
+                bottom: { style: "thin", color: { rgb: "94A3B8" } },
+                left: { style: "thin", color: { rgb: "94A3B8" } },
+                right: { style: "thin", color: { rgb: "94A3B8" } }
+            }
+        };
+
+        const dataStyle = {
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+                top: { style: "thin", color: { rgb: "E2E8F0" } },
+                bottom: { style: "thin", color: { rgb: "E2E8F0" } },
+                left: { style: "thin", color: { rgb: "E2E8F0" } },
+                right: { style: "thin", color: { rgb: "E2E8F0" } }
+            }
+        };
+
+        const highlightStyle = {
+            font: { bold: true },
+            fill: { fgColor: { rgb: "FEF08A" } }, // Yellow
+            ...dataStyle
+        };
+
+        const finalRowStyle = {
+            font: { bold: true, color: { rgb: "000000" } },
+            fill: { fgColor: { rgb: "DCFCE7" } }, // Green
+            ...dataStyle
+        };
+
+        // Construct Data Array
+        const excelData = [];
+        
+        // Headers
+        const headerRow = ["COMPONENT", ...outcomes.map(o => o.id)];
+        excelData.push(headerRow);
+
+        // Course Rows
+        calculateData.courseRows.forEach(({ course, attainment }) => {
+            const row = [`${course.code}`];
+            outcomes.forEach(o => {
+                const val = attainment[o.id];
+                row.push(val ? val.toFixed(2) : '-');
+            });
+            excelData.push(row);
+        });
+
+        // Summary Rows
+        calculateData.summaryRows.forEach((summaryRow) => {
+            const row = [summaryRow.label];
+            outcomes.forEach(o => {
+                const val = summaryRow.data[o.id];
+                if (val !== undefined && val !== null && !isNaN(val)) {
+                    row.push(typeof val === 'number' ? val.toFixed(2) : parseFloat(val).toFixed(2));
+                } else {
+                    row.push('-');
+                }
+            });
+            excelData.push(row);
+        });
+
+        // Generate Sheet
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+
+        // Apply Styles
+        for (let R = 0; R < excelData.length; ++R) {
+            for (let C = 0; C < excelData[R].length; ++C) {
+                const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                if (!ws[cellRef]) continue;
+
+                if (R === 0) {
+                    ws[cellRef].s = headerStyle;
+                } else if (R >= calculateData.courseRows.length + 1) {
+                    // Summary Rows Styling
+                    const summaryLabel = excelData[R][0];
+                    if (summaryLabel.includes('[A]') || summaryLabel.includes('[B]')) {
+                        ws[cellRef].s = highlightStyle;
+                    } else if (summaryLabel.includes('Total Attainment')) {
+                        ws[cellRef].s = finalRowStyle;
+                    } else {
+                        ws[cellRef].s = { ...dataStyle, font: { bold: C === 0 } }; 
+                    }
+                } else {
+                    // Normal Course Rows
+                    ws[cellRef].s = { ...dataStyle, alignment: { horizontal: C === 0 ? "left" : "center" } };
+                }
+            }
+        }
+
+        // Adjust column widths
+        const wscols = [{ wch: 40 }];
+        outcomes.forEach(() => wscols.push({ wch: 10 }));
+        ws['!cols'] = wscols;
+
+        // Create Workbook and save
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Department Attainment");
+        XLSX.writeFile(wb, `${deptName}_Attainment_Report.xlsx`);
+    };
 
     return (
         <div className="space-y-6 p-6">
@@ -273,6 +389,19 @@ const DepartmentAttainmentPage = () => {
                                 {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </select>
                         </div>
+                    </div>
+
+                    {/* NEW EXPORT BUTTON */}
+                    <div className="w-full md:w-auto self-end">
+                        <button 
+                            onClick={handleExportToExcel}
+                            disabled={!calculateData || calculateData.courseRows.length === 0}
+                            className="flex items-center justify-center w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium shadow-sm disabled:opacity-50 whitespace-nowrap"
+                            title="Export to Excel"
+                        >
+                            <Download className="w-4 h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Export</span>
+                        </button>
                     </div>
                 </div>
             </div>

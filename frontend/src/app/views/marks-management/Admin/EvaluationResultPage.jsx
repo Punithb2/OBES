@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '../shared/Card';
 import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
-import { Loader2, Filter } from 'lucide-react';
+import { Loader2, Filter, Download } from 'lucide-react'; // Added Download icon
+import * as XLSX from 'xlsx-js-style'; // NEW: For Styled Excel Export
 
 const EvaluationResultPage = () => {
     const { user } = useAuth();
@@ -15,7 +16,7 @@ const EvaluationResultPage = () => {
     const [matrix, setMatrix] = useState({});
     const [surveyData, setSurveyData] = useState({ exit_survey: {}, employer_survey: {}, alumni_survey: {} });
     
-    // NEW: Store backend-calculated CO reports for each course
+    // Store backend-calculated CO reports for each course
     const [courseReports, setCourseReports] = useState({});
     
     // UI State
@@ -30,7 +31,6 @@ const EvaluationResultPage = () => {
                 setLoading(true);
                 const deptId = user.department;
 
-                // A. Fetch Base Configuration Data (Notice: We removed /students/ and /marks/!)
                 const [coursesRes, schemesRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
                     api.get(`/courses/?department=${deptId}`),
                     api.get('/schemes/'), 
@@ -72,7 +72,7 @@ const EvaluationResultPage = () => {
                 });
                 setMatrix(mBuilder);
 
-                // B. DYNAMICALLY FETCH PRE-CALCULATED REPORTS FOR ALL COURSES
+                // DYNAMICALLY FETCH PRE-CALCULATED REPORTS FOR ALL COURSES
                 const reportsMap = {};
                 const reportPromises = safeCourses.map(course => 
                     api.get(`/reports/course-attainment/${course.id}/`).catch(() => null)
@@ -82,7 +82,6 @@ const EvaluationResultPage = () => {
                 
                 safeCourses.forEach((course, index) => {
                     const res = reports[index];
-                    // Save the 'co_attainment' array (which contains direct, indirect, and final score_index)
                     if (res && res.data && res.data.co_attainment) {
                         reportsMap[course.id] = res.data.co_attainment;
                     } else {
@@ -111,13 +110,11 @@ const EvaluationResultPage = () => {
             const courseMatrix = matrix[course.id] || {};
             const poAttainment = {};
 
-            // Multiply Backend Final Score Index by Articulation Matrix Mapping
             outcomes.forEach(outcome => {
                 let wSum = 0, wCount = 0;
                 coData.forEach(coItem => {
                     const mapVal = parseFloat(courseMatrix[coItem.co]?.[outcome.id]);
                     if (!isNaN(mapVal)) {
-                        // Formula: (Mapping Value * Backend CO Attainment) / 3
                         wSum += (mapVal * coItem.score_index) / 3;
                         wCount++;
                     }
@@ -199,6 +196,118 @@ const EvaluationResultPage = () => {
 
     }, [courses, outcomes, matrix, surveyData, schemes, selectedSchemeId, courseReports]);
 
+    // --- 3. EXPORT TO EXCEL ---
+    const handleExportToExcel = () => {
+        if (!calculateData || calculateData.courseRows.length === 0) {
+            alert("No data available to export.");
+            return;
+        }
+
+        // Define Styles
+        const headerStyle = {
+            font: { bold: true, color: { rgb: "000000" }, sz: 11 },
+            fill: { fgColor: { rgb: "E2E8F0" } }, // Gray-200
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+                top: { style: "thin", color: { rgb: "94A3B8" } },
+                bottom: { style: "thin", color: { rgb: "94A3B8" } },
+                left: { style: "thin", color: { rgb: "94A3B8" } },
+                right: { style: "thin", color: { rgb: "94A3B8" } }
+            }
+        };
+
+        const dataStyle = {
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+                top: { style: "thin", color: { rgb: "E2E8F0" } },
+                bottom: { style: "thin", color: { rgb: "E2E8F0" } },
+                left: { style: "thin", color: { rgb: "E2E8F0" } },
+                right: { style: "thin", color: { rgb: "E2E8F0" } }
+            }
+        };
+
+        const highlightStyle = {
+            font: { bold: true },
+            fill: { fgColor: { rgb: "FEF08A" } }, // Yellow
+            ...dataStyle
+        };
+
+        const finalRowStyle = {
+            font: { bold: true, color: { rgb: "000000" } },
+            fill: { fgColor: { rgb: "DCFCE7" } }, // Green
+            ...dataStyle
+        };
+
+        // Construct Data Array
+        const excelData = [];
+        
+        // Headers
+        const headerRow = ["COMPONENT", ...outcomes.map(o => o.id)];
+        excelData.push(headerRow);
+
+        // Course Rows
+        calculateData.courseRows.forEach(({ course, attainment }) => {
+            const row = [`${course.code}`];
+            outcomes.forEach(o => {
+                const val = attainment[o.id];
+                row.push(val ? val.toFixed(2) : '-');
+            });
+            excelData.push(row);
+        });
+
+        // Summary Rows
+        calculateData.summaryRows.forEach((summaryRow) => {
+            const row = [summaryRow.label];
+            outcomes.forEach(o => {
+                const val = summaryRow.data[o.id];
+                if (val !== undefined && val !== null && !isNaN(val)) {
+                    row.push(typeof val === 'number' ? val.toFixed(2) : parseFloat(val).toFixed(2));
+                } else {
+                    row.push('-');
+                }
+            });
+            excelData.push(row);
+        });
+
+        // Generate Sheet
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+
+        // Apply Styles
+        for (let R = 0; R < excelData.length; ++R) {
+            for (let C = 0; C < excelData[R].length; ++C) {
+                const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+                if (!ws[cellRef]) continue;
+
+                if (R === 0) {
+                    ws[cellRef].s = headerStyle;
+                } else if (R >= calculateData.courseRows.length + 1) {
+                    // Summary Rows Styling
+                    const summaryLabel = excelData[R][0];
+                    if (summaryLabel.includes('[A]') || summaryLabel.includes('[B]')) {
+                        ws[cellRef].s = highlightStyle;
+                    } else if (summaryLabel.includes('Total Attainment')) {
+                        ws[cellRef].s = finalRowStyle;
+                    } else {
+                        ws[cellRef].s = { ...dataStyle, font: { bold: C === 0 } }; 
+                    }
+                } else {
+                    // Normal Course Rows
+                    ws[cellRef].s = { ...dataStyle, alignment: { horizontal: C === 0 ? "left" : "center" } };
+                }
+            }
+        }
+
+        // Adjust column widths
+        const wscols = [{ wch: 40 }];
+        outcomes.forEach(() => wscols.push({ wch: 10 }));
+        ws['!cols'] = wscols;
+
+        // Create Workbook and save
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Evaluation Result");
+        XLSX.writeFile(wb, `Evaluation_Result_Report.xlsx`);
+    };
+
 
     if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
 
@@ -212,18 +321,31 @@ const EvaluationResultPage = () => {
                     </p>
                 </div>
                 
-                {/* Reference Scheme Selector */}
-                <div className="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg border shadow-sm">
-                    <Filter className="w-4 h-4 text-gray-500" />
-                    <span className="text-xs font-bold text-gray-500 uppercase">Summary Logic:</span>
-                    <select 
-                        value={selectedSchemeId}
-                        onChange={(e) => setSelectedSchemeId(e.target.value)}
-                        className="text-sm font-bold border-none focus:ring-0 cursor-pointer bg-transparent text-primary-700 dark:text-primary-400"
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                    {/* Reference Scheme Selector */}
+                    <div className="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg border shadow-sm w-full sm:w-auto">
+                        <Filter className="w-4 h-4 text-gray-500" />
+                        <span className="text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Summary Logic:</span>
+                        <select 
+                            value={selectedSchemeId}
+                            onChange={(e) => setSelectedSchemeId(e.target.value)}
+                            className="text-sm font-bold border-none focus:ring-0 cursor-pointer bg-transparent text-primary-700 dark:text-primary-400 min-w-[100px]"
+                        >
+                            {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            {schemes.length === 0 && <option value="">No Schemes</option>}
+                        </select>
+                    </div>
+
+                    {/* NEW EXPORT BUTTON */}
+                    <button 
+                        onClick={handleExportToExcel}
+                        disabled={!calculateData || calculateData.courseRows.length === 0}
+                        className="flex items-center justify-center w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium shadow-sm disabled:opacity-50 whitespace-nowrap h-full"
+                        title="Export to Excel"
                     >
-                        {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        {schemes.length === 0 && <option value="">No Schemes Available</option>}
-                    </select>
+                        <Download className="w-4 h-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Export</span>
+                    </button>
                 </div>
             </div>
 
