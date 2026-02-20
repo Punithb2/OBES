@@ -1,21 +1,21 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
-import api from '../../../services/api';
-import { Loader2, AlertCircle, Download } from 'lucide-react'; // Added Download Icon
+import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
+import { Loader2, AlertCircle, Download } from 'lucide-react';
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement
 } from 'chart.js';
 import { Bar, Pie } from 'react-chartjs-2';
-import html2canvas from 'html2canvas'; // NEW: For PDF Export
-import jsPDF from 'jspdf';             // NEW: For PDF Export
+import html2canvas from 'html2canvas'; 
+import jsPDF from 'jspdf';             
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
 const AttainmentReportPage = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false); // NEW: State for export loading
+  const [exporting, setExporting] = useState(false); 
   
   // States
   const [courses, setCourses] = useState([]);
@@ -31,9 +31,11 @@ const AttainmentReportPage = () => {
     const fetchCourses = async () => {
         if (!user) return;
         try {
-            const res = await api.get('/courses/');
-            const coursesData = res.data.results || res.data;
-            const assigned = coursesData.filter(c => String(c.assigned_faculty) === String(user.id));
+            // RECURSIVE FETCH IMPLEMENTED HERE
+            const coursesData = await fetchAllPages('/courses/');
+            const assigned = Array.isArray(coursesData) 
+                ? coursesData.filter(c => String(c.assigned_faculty) === String(user.id))
+                : [];
             setCourses(assigned);
             
             if (assigned.length > 0) setSelectedCourseId(assigned[0].id);
@@ -59,17 +61,19 @@ const AttainmentReportPage = () => {
               setReportData(reportRes.data);
 
               // B. Fetch ONLY filtered marks for the Grade Distribution Pie Chart
-              const [studentsRes, marksRes] = await Promise.all([
-                  api.get('/students/'), 
-                  api.get(`/marks/?course=${selectedCourseId}`) // Filtered to save bandwidth!
+              // RECURSIVE FETCH IMPLEMENTED HERE
+              const [allStudents, marks] = await Promise.all([
+                  fetchAllPages('/students/'), 
+                  fetchAllPages(`/marks/?course=${selectedCourseId}`)
               ]);
               
-              const allStudents = studentsRes.data.results || studentsRes.data;
-              const courseStudents = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
+              const courseStudents = Array.isArray(allStudents) 
+                  ? allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId))
+                  : [];
+              
               setTotalStudentsCount(courseStudents.length);
 
-              const marks = marksRes.data.results || marksRes.data;
-              calculateGrades(courseStudents, marks);
+              calculateGrades(courseStudents, Array.isArray(marks) ? marks : []);
 
           } catch (error) {
               console.error("Failed to load analytics", error);
@@ -115,7 +119,6 @@ const AttainmentReportPage = () => {
   const chartConfig = useMemo(() => {
       if (!reportData || !gradeDistribution) return null;
 
-      // Grade Pie
       const gradePieData = {
           labels: ['Distinction (>=70%)', 'First Class (60-70%)', 'Second Class (50-60%)', 'Pass (40-50%)', 'Fail (<40%)'],
           datasets: [{
@@ -131,20 +134,18 @@ const AttainmentReportPage = () => {
           }]
       };
 
-      // CO Bar (Mapped directly from backend response)
       const coBarData = {
           labels: reportData.co_attainment.map(co => co.co.includes('.') ? co.co.split('.')[1] : co.co),
           datasets: [
               {
                   label: 'Target (3.0)',
-                  data: reportData.co_attainment.map(() => 100), // Visual scale to 100%
+                  data: reportData.co_attainment.map(() => 100), 
                   backgroundColor: 'rgba(229, 231, 235, 0.5)',
                   borderColor: 'rgba(209, 213, 219, 1)',
                   borderWidth: 1,
               },
               {
                   label: 'Attained %',
-                  // Convert score index (0-3) to percentage (0-100)
                   data: reportData.co_attainment.map(co => (co.score_index / 3) * 100),
                   backgroundColor: 'rgba(59, 130, 246, 0.9)',
                   borderColor: 'rgba(37, 99, 235, 1)',
@@ -153,7 +154,6 @@ const AttainmentReportPage = () => {
           ]
       };
 
-      // PO Bar (Mapped directly from backend response)
       const poBarData = {
           labels: reportData.po_attainment.map(p => p.po),
           datasets: [{
@@ -174,30 +174,24 @@ const AttainmentReportPage = () => {
 
     setExporting(true);
     try {
-        // Temporarily adjust styles for better PDF capture (especially dark mode)
         const originalBg = element.style.backgroundColor;
         element.style.backgroundColor = '#ffffff'; 
 
-        // Take a high-res snapshot of the element
         const canvas = await html2canvas(element, { 
-            scale: 2, // 2x scale for crisp chart rendering 
+            scale: 2, 
             useCORS: true,
             logging: false,
             backgroundColor: '#ffffff'
         });
         
-        // Restore original style
         element.style.backgroundColor = originalBg;
 
         const imgData = canvas.toDataURL('image/png');
         
-        // Create A4 PDF (Portrait, Millimeters)
         const pdf = new jsPDF('p', 'mm', 'a4');
         const pdfWidth = pdf.internal.pageSize.getWidth();
-        // Calculate height to maintain aspect ratio
         const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
         
-        // Add image to PDF and save
         pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
         pdf.save(`${selectedCourse?.code || 'Course'}_Analytics_Report.pdf`);
     } catch (error) {
@@ -207,7 +201,6 @@ const AttainmentReportPage = () => {
         setExporting(false);
     }
   };
-
 
   if (!user) return null;
 
@@ -219,7 +212,6 @@ const AttainmentReportPage = () => {
             <p className="text-gray-500 dark:text-gray-400 mt-1">Visual attainment and grade distribution.</p>
         </div>
         
-        {/* Dropdown & Export Button */}
         <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
             <select 
             value={selectedCourseId}
@@ -251,10 +243,8 @@ const AttainmentReportPage = () => {
           </div>
       ) : selectedCourse && reportData && chartConfig ? (
         
-        /* WRAP THE ENTIRE DASHBOARD IN THIS ID FOR PDF CAPTURE */
         <div id="analytics-report" className="space-y-6 bg-transparent dark:bg-gray-900 pb-4">
           
-          {/* Summary Cards */}
            <Card>
               <CardContent className="pt-6">
                   <dl className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-4">
@@ -287,7 +277,6 @@ const AttainmentReportPage = () => {
           </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* 1. CO Attainment */}
               <Card>
                 <CardHeader>
                   <CardTitle>CO Attainment (Target vs Actual)</CardTitle>
@@ -310,7 +299,6 @@ const AttainmentReportPage = () => {
                 </CardContent>
               </Card>
 
-              {/* 2. Grade Distribution */}
               <Card>
                 <CardHeader>
                   <CardTitle>Student Grade Distribution</CardTitle>
@@ -331,7 +319,6 @@ const AttainmentReportPage = () => {
               </Card>
           </div>
           
-          {/* 3. PO Attainment */}
           <Card>
             <CardHeader>
               <CardTitle>Program Outcome (PO) Attainment</CardTitle>

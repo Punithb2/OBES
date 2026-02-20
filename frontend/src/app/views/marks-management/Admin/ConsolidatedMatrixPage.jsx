@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api'; 
 import { useAuth } from '../../../contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
@@ -22,17 +22,12 @@ const ConsolidatedMatrixPage = () => {
                 setLoading(true);
                 const deptId = user.department;
 
-                const [coursesRes, posRes, psosRes, matrixRes] = await Promise.all([
-                    api.get(`/courses/?department=${deptId}`),
-                    api.get('/pos/'),
-                    api.get('/psos/'),
-                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: { results: [] } }))
+                const [fetchedCourses, fetchedPos, fetchedPsos, fetchedMatrix] = await Promise.all([
+                    fetchAllPages(`/courses/?department=${deptId}`),
+                    fetchAllPages('/pos/'),
+                    fetchAllPages('/psos/'),
+                    fetchAllPages(`/articulation-matrix/?department=${deptId}`).catch(() => [])
                 ]);
-
-                const fetchedCourses = coursesRes.data.results || coursesRes.data || [];
-                const fetchedPos = posRes.data.results || posRes.data || [];
-                const fetchedPsos = psosRes.data.results || psosRes.data || [];
-                const fetchedMatrix = matrixRes.data.results || matrixRes.data || [];
 
                 const sortById = (a, b) => {
                     const numA = parseInt((a.id || '').match(/\d+/)?.[0] || 0);
@@ -55,7 +50,6 @@ const ConsolidatedMatrixPage = () => {
                 }
                 setMatrix(matrixMap);
 
-                // Fetch Pre-calculated Backend Reports
                 const reportsMap = {};
                 const reportPromises = safeCourses.map(course => 
                     api.get(`/reports/course-attainment/${course.id}/`).catch(() => null)
@@ -99,7 +93,6 @@ const ConsolidatedMatrixPage = () => {
             coData.forEach(coItem => {
                 const mapping = parseFloat(courseMatrix[coItem.co]?.[outcome.id]);
                 if (!isNaN(mapping)) {
-                    // Actual = (Mapping * Final_CO_Score_Index) / 3
                     weightedSum += (mapping * coItem.score_index) / 3;
                     weightCount++;
                 }
@@ -128,7 +121,7 @@ const ConsolidatedMatrixPage = () => {
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Consolidated Attainment Matrix</h1>
                     <p className="text-gray-500 dark:text-gray-400 mt-1">
-                        Live calculated PO/PSO attainment based on student marks.
+                        Consolidated PO/PSO attainment based on student marks.
                     </p>
                 </div>
                 <div className="mt-4 sm:mt-0">
@@ -152,8 +145,6 @@ const ConsolidatedMatrixPage = () => {
             ) : (
                 filteredCourses.map(course => {
                     const calculatedData = calculateCourseAttainment(course);
-                    const isCalculated = !!calculatedData;
-                    
                     const coIds = (course.cos && course.cos.length > 0) ? course.cos.map(c => c.id) : [];
 
                     return (
@@ -164,15 +155,7 @@ const ConsolidatedMatrixPage = () => {
                                         <CardTitle className="text-lg">{course.code} - {course.name}</CardTitle>
                                         <CardDescription>Semester {course.semester} • Credits: {course.credits}</CardDescription>
                                     </div>
-                                    {isCalculated ? (
-                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                                            Calculated Live
-                                        </span>
-                                    ) : (
-                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
-                                            No Marks Data
-                                        </span>
-                                    )}
+                                    {/* The "Calculated Live" / "No Marks Data" badges have been removed from here */}
                                 </div>
                             </CardHeader>
                             <CardContent className="p-0">
@@ -191,7 +174,6 @@ const ConsolidatedMatrixPage = () => {
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                            {/* Show mapped Articulation targets */}
                                             {coIds.map(coId => (
                                                 <tr key={coId}>
                                                     <td className="sticky left-0 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-900 dark:text-white border-r dark:border-gray-600 z-10">

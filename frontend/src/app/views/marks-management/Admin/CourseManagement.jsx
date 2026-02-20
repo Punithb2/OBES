@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from '../../../contexts/AuthContext';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { Icons } from '../shared/icons';
 import { Loader2 } from 'lucide-react'; 
+import ConfirmationModal from '../shared/ConfirmationModal';
 
 // --- 1. COURSE MODAL COMPONENT ---
 const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) => {
@@ -25,7 +26,6 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                 scheme: course.scheme || '' 
             });
         } else {
-            // Set default scheme if available (defaults to the first one)
             setFormData({ 
                 code: '', 
                 name: '', 
@@ -56,7 +56,6 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                 </div>
                 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Course Code & Credits */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Course Code <span className="text-red-500">*</span></label>
@@ -67,7 +66,7 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                                 onChange={e => setFormData({...formData, code: e.target.value.toUpperCase()})}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm font-mono uppercase"
                                 placeholder="e.g. 18CS51"
-                                disabled={!!course} // Disable code editing if editing existing course
+                                disabled={!!course}
                             />
                         </div>
                         <div>
@@ -84,7 +83,6 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                         </div>
                     </div>
 
-                    {/* Course Name */}
                     <div>
                         <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Course Name <span className="text-red-500">*</span></label>
                         <input 
@@ -97,7 +95,6 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                         />
                     </div>
 
-                    {/* Scheme Selection */}
                     <div>
                         <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Academic Scheme <span className="text-red-500">*</span></label>
                         <select 
@@ -114,7 +111,6 @@ const CourseModal = ({ isOpen, onClose, onSave, course = null, schemes = [] }) =
                         <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">Determines calculation rules (Pass criteria, Attainment Levels).</p>
                     </div>
 
-                    {/* Semester */}
                     <div>
                         <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Semester <span className="text-red-500">*</span></label>
                         <select 
@@ -159,6 +155,7 @@ const CourseManagement = () => {
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedCourse, setSelectedCourse] = useState(null);
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false, idToDelete: null });
 
     // Fetch Data
     const fetchData = async () => {
@@ -166,16 +163,12 @@ const CourseManagement = () => {
 
         try {
             setLoading(true);
-            const [coursesRes, schemesRes] = await Promise.all([
-                // Fixed query param to use standard Django filter 'department='
-                api.get(`/courses/?department=${user.department}`),
-                api.get('/schemes/')
+            // RECURSIVE FETCH IMPLEMENTED HERE
+            const [fetchedCourses, fetchedSchemes] = await Promise.all([
+                fetchAllPages(`/courses/?department=${user.department}`),
+                fetchAllPages('/schemes/')
             ]);
             
-            // FIX: Safely extract paginated results for both courses and schemes
-            const fetchedCourses = coursesRes.data.results || coursesRes.data;
-            const fetchedSchemes = schemesRes.data.results || schemesRes.data;
-
             setCourses(Array.isArray(fetchedCourses) ? fetchedCourses : []);
             setSchemes(Array.isArray(fetchedSchemes) ? fetchedSchemes : []);
 
@@ -190,7 +183,6 @@ const CourseManagement = () => {
         fetchData();
     }, [user]);
 
-    // Helpers
     const getSchemeName = (schemeId) => {
         const s = schemes.find(sc => String(sc.id) === String(schemeId));
         return s ? s.name : <span className="text-red-400 italic font-bold text-xs">Not Assigned</span>;
@@ -220,30 +212,32 @@ const CourseManagement = () => {
 
         try {
             if (selectedCourse) {
-                // UPDATE existing
                 await api.patch(`/courses/${selectedCourse.id}/`, payload);
             } else {
-                // CREATE new
                 await api.post('/courses/', payload); 
             }
             
             closeModal();
-            fetchData(); // Refresh list 
+            fetchData(); 
         } catch (error) {
             console.error("Operation failed", error);
             alert("Failed to save course. Ensure Course Code is unique.");
         }
     };
 
-    const handleDelete = async (id) => {
-        if (window.confirm("Delete this course? This will remove all associated marks and attainment data.")) {
-            try {
-                await api.delete(`/courses/${id}/`);
-                fetchData();
-            } catch (error) {
-                console.error("Delete failed", error);
-                alert("Failed to delete course.");
-            }
+    const openDeleteModal = (id) => {
+        setDeleteModal({ isOpen: true, idToDelete: id });
+    };
+
+    const confirmDelete = async () => {
+        try {
+            await api.delete(`/courses/${deleteModal.idToDelete}/`);
+            fetchData();
+        } catch (error) {
+            console.error("Delete failed", error);
+            alert("Failed to delete course.");
+        } finally {
+            setDeleteModal({ isOpen: false, idToDelete: null });
         }
     };
 
@@ -256,6 +250,15 @@ const CourseManagement = () => {
                 course={selectedCourse} 
                 schemes={schemes}
             />
+
+            {deleteModal.isOpen && (
+                <ConfirmationModal 
+                    title="Delete Course"
+                    message="Are you sure you want to delete this course? This will completely remove all associated marks and attainment data. This action cannot be undone."
+                    onConfirm={confirmDelete}
+                    onCancel={() => setDeleteModal({ isOpen: false, idToDelete: null })}
+                />
+            )}
 
             <Card>
                 <CardHeader>
@@ -325,7 +328,7 @@ const CourseManagement = () => {
                                                             <Icons.PencilSquare className="w-5 h-5" />
                                                         </button>
                                                         <button 
-                                                            onClick={() => handleDelete(c.id)}
+                                                            onClick={() => openDeleteModal(c.id)}
                                                             className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 transition-colors"
                                                             title="Delete Course"
                                                         >

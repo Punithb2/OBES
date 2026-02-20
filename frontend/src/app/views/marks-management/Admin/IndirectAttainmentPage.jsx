@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
+import { Loader2 } from 'lucide-react';
+import ConfirmationModal from '../shared/ConfirmationModal'; // IMPORT MODAL
 
 // Reusable Card Component for each Survey Type
 const SurveyCard = ({ title, description, outcomes, ratings, onRatingChange }) => {
@@ -51,12 +53,17 @@ const SurveyCard = ({ title, description, outcomes, ratings, onRatingChange }) =
 const IndirectAttainmentPage = () => {
     const { user } = useAuth();
     const [loading, setLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
     const [outcomes, setOutcomes] = useState([]); 
-    
-    // Store the ID of the survey record if it exists (for updates)
     const [surveyId, setSurveyId] = useState(null);
 
-    // State to store ratings
+    // --- UI MODAL STATE ---
+    const [uiModal, setUiModal] = useState({ isOpen: false, title: '', message: '', isAlert: true, theme: 'primary' });
+    
+    const showAlert = (title, message, theme = 'primary') => {
+        setUiModal({ isOpen: true, title, message, isAlert: true, theme });
+    };
+
     const [surveyRatings, setSurveyRatings] = useState({
         exitSurvey: {},
         employerSurvey: {},
@@ -72,17 +79,14 @@ const IndirectAttainmentPage = () => {
                 setLoading(true);
                 const deptId = user.department;
 
-                // Fetch Outcomes
                 const [posRes, psosRes] = await Promise.all([
                     api.get('/pos/'),
                     api.get('/psos/')
                 ]);
                 
-                // FIX: Safely extract paginated results
                 const fetchedPos = posRes.data.results || posRes.data || [];
                 const fetchedPsos = psosRes.data.results || psosRes.data || [];
 
-                // Sort naturally
                 const sortById = (a, b) => {
                     const numA = parseInt((a.id || '').match(/\d+/)?.[0] || 0);
                     const numB = parseInt((b.id || '').match(/\d+/)?.[0] || 0);
@@ -94,25 +98,18 @@ const IndirectAttainmentPage = () => {
 
                 setOutcomes([...safePos, ...safePsos]);
 
-                // Fetch Existing Survey Data
                 const surveyRes = await api.get(`/surveys/?department=${deptId}`);
-                
-                // FIX: Safely extract paginated survey results
                 const fetchedSurveys = surveyRes.data.results || surveyRes.data;
                 
                 if (Array.isArray(fetchedSurveys) && fetchedSurveys.length > 0) {
-                    // Data exists: Load it
                     const existingData = fetchedSurveys[0];
-                    setSurveyId(existingData.id); // Save ID for PUT/PATCH later
+                    setSurveyId(existingData.id); 
                     setSurveyRatings({
                         exitSurvey: existingData.exit_survey || {},
                         employerSurvey: existingData.employer_survey || {},
                         alumniSurvey: existingData.alumni_survey || {}
                     });
-                } else {
-                    console.log("No existing survey data found, starting fresh.");
                 }
-
             } catch (error) {
                 console.error("Failed to load data", error);
             } finally {
@@ -131,7 +128,6 @@ const IndirectAttainmentPage = () => {
             ...prev,
             [surveyType]: {
                 ...prev[surveyType],
-                // Allow empty string for clearing, otherwise clamp between 0 and 3
                 [outcomeId]: value === '' ? '' : Math.max(0, Math.min(3, isNaN(numericValue) ? 0 : numericValue))
             }
         }));
@@ -140,6 +136,7 @@ const IndirectAttainmentPage = () => {
     // 3. Save Changes
     const handleSaveChanges = async () => {
         if (!user || !user.department) return;
+        setIsSaving(true);
 
         const payload = {
             department: user.department,
@@ -150,27 +147,39 @@ const IndirectAttainmentPage = () => {
 
         try {
             if (surveyId) {
-                // UPDATE existing record (PATCH)
                 await api.patch(`/surveys/${surveyId}/`, payload);
             } else {
-                // CREATE new record (POST)
                 const res = await api.post('/surveys/', payload);
-                // Capture the new ID immediately so next save is an update
                 setSurveyId(res.data.id); 
             }
-            alert('Survey ratings saved successfully!');
+            showAlert('Success', 'Survey ratings saved successfully.', 'success');
         } catch (error) {
             console.error("Failed to save surveys", error);
-            alert('Error saving data. Please check your network connection.');
+            showAlert('Error', 'Failed to save survey data. Check connection.', 'danger');
+        } finally {
+            setIsSaving(false);
         }
     };
 
     if (loading) {
-        return <div className="p-12 text-center text-gray-500">Loading survey data...</div>;
+        return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
     }
 
     return (
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 pb-10">
+            
+            {/* SHARED CONFIRMATION MODAL */}
+            {uiModal.isOpen && (
+                <ConfirmationModal 
+                    title={uiModal.title}
+                    message={uiModal.message}
+                    isAlert={uiModal.isAlert}
+                    theme={uiModal.theme}
+                    confirmText="OK"
+                    onConfirm={() => setUiModal(prev => ({ ...prev, isOpen: false }))}
+                />
+            )}
+
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Indirect Attainment Surveys</h1>
@@ -180,9 +189,11 @@ const IndirectAttainmentPage = () => {
                 </div>
                 <button
                     onClick={handleSaveChanges}
-                    className="mt-4 sm:mt-0 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium shadow-sm transition-colors"
+                    disabled={isSaving}
+                    className="mt-4 sm:mt-0 flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium shadow-sm transition-colors disabled:opacity-50"
                 >
-                    Save Changes
+                    {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                    {isSaving ? 'Saving...' : 'Save Changes'}
                 </button>
             </div>
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from '../../../contexts/AuthContext';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { Icons } from '../shared/icons';
 
 // --- Assignment Modal Component ---
@@ -178,18 +178,12 @@ const CourseAssignment = () => {
             setLoading(true);
             const deptId = user.department;
 
-            // 1. Fetch Faculty (Filtered by Dept)
-            const facultyResponse = await api.get(`/users/?role=faculty&department=${deptId}`);
-            
-            // FIX: Safely extract paginated results
-            const fetchedFaculty = facultyResponse.data.results || facultyResponse.data;
+            // 1. Fetch Faculty (Filtered by Dept) WITH RECURSIVE HELPER
+            const fetchedFaculty = await fetchAllPages(`/users/?role=faculty&department=${deptId}`);
             setFaculty(Array.isArray(fetchedFaculty) ? fetchedFaculty : []);
 
-            // 2. Fetch Courses (Filtered by Dept) -> FIXED: departmentId to department
-            const coursesResponse = await api.get(`/courses/?department=${deptId}`);
-            
-            // FIX: Safely extract paginated results
-            const fetchedCourses = coursesResponse.data.results || coursesResponse.data;
+            // 2. Fetch Courses (Filtered by Dept) WITH RECURSIVE HELPER
+            const fetchedCourses = await fetchAllPages(`/courses/?department=${deptId}`);
             
             // FIX: Check if it's an array before sorting
             const sortedCourses = Array.isArray(fetchedCourses) 

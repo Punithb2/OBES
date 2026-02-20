@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '../shared/Card';
 import { useAuth } from '../../../contexts/AuthContext';
-import api from '../../../services/api';
-import { Loader2, Filter, Download } from 'lucide-react'; // Added Download icon
-import * as XLSX from 'xlsx-js-style'; // NEW: For Styled Excel Export
+import api, { fetchAllPages } from '../../../services/api'; 
+import { Loader2, Filter, Download } from 'lucide-react'; 
+import * as XLSX from 'xlsx-js-style'; 
 
 const EvaluationResultPage = () => {
     const { user } = useAuth();
@@ -31,22 +31,14 @@ const EvaluationResultPage = () => {
                 setLoading(true);
                 const deptId = user.department;
 
-                const [coursesRes, schemesRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
-                    api.get(`/courses/?department=${deptId}`),
-                    api.get('/schemes/'), 
-                    api.get('/pos/'),
-                    api.get('/psos/'),
-                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: { results: [] } })),
-                    api.get(`/surveys/?department=${deptId}`).catch(() => ({ data: { results: [] } })) 
+                const [safeCourses, safeSchemes, safePos, safePsos, safeMatrix, safeSurveys] = await Promise.all([
+                    fetchAllPages(`/courses/?department=${deptId}`),
+                    fetchAllPages('/schemes/'), 
+                    fetchAllPages('/pos/'),
+                    fetchAllPages('/psos/'),
+                    fetchAllPages(`/articulation-matrix/?department=${deptId}`).catch(() => []),
+                    fetchAllPages(`/surveys/?department=${deptId}`).catch(() => []) 
                 ]);
-
-                // Safely extract paginated responses
-                const safeCourses = coursesRes.data.results || coursesRes.data || [];
-                const safeSchemes = schemesRes.data.results || schemesRes.data || [];
-                const safePos = posRes.data.results || posRes.data || [];
-                const safePsos = psosRes.data.results || psosRes.data || [];
-                const safeMatrix = matrixRes.data.results || matrixRes.data || [];
-                const safeSurveys = surveyRes.data.results || surveyRes.data || [];
 
                 // Sort Outcomes numerically
                 const sortById = (a, b) => {
@@ -58,8 +50,8 @@ const EvaluationResultPage = () => {
                 const sortedPos = Array.isArray(safePos) ? [...safePos].sort(sortById) : [];
                 const sortedPsos = Array.isArray(safePsos) ? [...safePsos].sort(sortById) : [];
 
-                setCourses(safeCourses);
-                setSchemes(safeSchemes);
+                setCourses(Array.isArray(safeCourses) ? safeCourses : []);
+                setSchemes(Array.isArray(safeSchemes) ? safeSchemes : []);
                 setOutcomes([...sortedPos, ...sortedPsos]);
 
                 if (safeSchemes.length > 0) setSelectedSchemeId(safeSchemes[0].id);
@@ -67,20 +59,22 @@ const EvaluationResultPage = () => {
 
                 // Process Articulation Matrix
                 const mBuilder = {};
-                safeMatrix.forEach(item => {
-                    if (item.course && item.matrix) mBuilder[item.course] = item.matrix;
-                });
+                if (Array.isArray(safeMatrix)) {
+                    safeMatrix.forEach(item => {
+                        if (item.course && item.matrix) mBuilder[item.course] = item.matrix;
+                    });
+                }
                 setMatrix(mBuilder);
 
                 // DYNAMICALLY FETCH PRE-CALCULATED REPORTS FOR ALL COURSES
                 const reportsMap = {};
-                const reportPromises = safeCourses.map(course => 
+                const reportPromises = (Array.isArray(safeCourses) ? safeCourses : []).map(course => 
                     api.get(`/reports/course-attainment/${course.id}/`).catch(() => null)
                 );
                 
                 const reports = await Promise.all(reportPromises);
                 
-                safeCourses.forEach((course, index) => {
+                (Array.isArray(safeCourses) ? safeCourses : []).forEach((course, index) => {
                     const res = reports[index];
                     if (res && res.data && res.data.co_attainment) {
                         reportsMap[course.id] = res.data.co_attainment;
@@ -110,12 +104,17 @@ const EvaluationResultPage = () => {
             const courseMatrix = matrix[course.id] || {};
             const poAttainment = {};
 
+            // FIX: Pull normalization factor from the scheme ASSIGNED TO THE COURSE
+            const courseSchemeRules = course.scheme_details?.settings || {};
+            const normFactor = courseSchemeRules.po_calculation?.normalization_factor || 3;
+
             outcomes.forEach(outcome => {
                 let wSum = 0, wCount = 0;
                 coData.forEach(coItem => {
                     const mapVal = parseFloat(courseMatrix[coItem.co]?.[outcome.id]);
                     if (!isNaN(mapVal)) {
-                        wSum += (mapVal * coItem.score_index) / 3;
+                        // FIX: Apply the course's specific normalization factor
+                        wSum += (mapVal * coItem.score_index) / normFactor;
                         wCount++;
                     }
                 });
@@ -157,9 +156,11 @@ const EvaluationResultPage = () => {
 
         // 4. Final Program Weightage (Based on Selected Reference Scheme)
         const refScheme = schemes.find(s => String(s.id) === String(selectedSchemeId));
-        const refRules = refScheme?.settings?.attainment_rules || {};
-        const wDirectProgram = (refRules.finalWeightage?.direct || 80) / 100;
-        const wIndirectProgram = (refRules.finalWeightage?.indirect || 20) / 100;
+        const refRules = refScheme?.settings || {};
+        
+        // FIX: Match the exact JSON structure from AdminConfigurationPage
+        const wDirectProgram = (refRules.weightage?.direct ?? 80) / 100;
+        const wIndirectProgram = (refRules.weightage?.indirect ?? 20) / 100;
 
         const rowC = {}; 
         const rowD = {};
@@ -203,10 +204,9 @@ const EvaluationResultPage = () => {
             return;
         }
 
-        // Define Styles
         const headerStyle = {
             font: { bold: true, color: { rgb: "000000" }, sz: 11 },
-            fill: { fgColor: { rgb: "E2E8F0" } }, // Gray-200
+            fill: { fgColor: { rgb: "E2E8F0" } },
             alignment: { horizontal: "center", vertical: "center" },
             border: {
                 top: { style: "thin", color: { rgb: "94A3B8" } },
@@ -228,24 +228,20 @@ const EvaluationResultPage = () => {
 
         const highlightStyle = {
             font: { bold: true },
-            fill: { fgColor: { rgb: "FEF08A" } }, // Yellow
+            fill: { fgColor: { rgb: "FEF08A" } },
             ...dataStyle
         };
 
         const finalRowStyle = {
             font: { bold: true, color: { rgb: "000000" } },
-            fill: { fgColor: { rgb: "DCFCE7" } }, // Green
+            fill: { fgColor: { rgb: "DCFCE7" } },
             ...dataStyle
         };
 
-        // Construct Data Array
         const excelData = [];
-        
-        // Headers
         const headerRow = ["COMPONENT", ...outcomes.map(o => o.id)];
         excelData.push(headerRow);
 
-        // Course Rows
         calculateData.courseRows.forEach(({ course, attainment }) => {
             const row = [`${course.code}`];
             outcomes.forEach(o => {
@@ -255,7 +251,6 @@ const EvaluationResultPage = () => {
             excelData.push(row);
         });
 
-        // Summary Rows
         calculateData.summaryRows.forEach((summaryRow) => {
             const row = [summaryRow.label];
             outcomes.forEach(o => {
@@ -269,10 +264,8 @@ const EvaluationResultPage = () => {
             excelData.push(row);
         });
 
-        // Generate Sheet
         const ws = XLSX.utils.aoa_to_sheet(excelData);
 
-        // Apply Styles
         for (let R = 0; R < excelData.length; ++R) {
             for (let C = 0; C < excelData[R].length; ++C) {
                 const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
@@ -281,7 +274,6 @@ const EvaluationResultPage = () => {
                 if (R === 0) {
                     ws[cellRef].s = headerStyle;
                 } else if (R >= calculateData.courseRows.length + 1) {
-                    // Summary Rows Styling
                     const summaryLabel = excelData[R][0];
                     if (summaryLabel.includes('[A]') || summaryLabel.includes('[B]')) {
                         ws[cellRef].s = highlightStyle;
@@ -291,23 +283,19 @@ const EvaluationResultPage = () => {
                         ws[cellRef].s = { ...dataStyle, font: { bold: C === 0 } }; 
                     }
                 } else {
-                    // Normal Course Rows
                     ws[cellRef].s = { ...dataStyle, alignment: { horizontal: C === 0 ? "left" : "center" } };
                 }
             }
         }
 
-        // Adjust column widths
         const wscols = [{ wch: 40 }];
         outcomes.forEach(() => wscols.push({ wch: 10 }));
         ws['!cols'] = wscols;
 
-        // Create Workbook and save
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Evaluation Result");
         XLSX.writeFile(wb, `Evaluation_Result_Report.xlsx`);
     };
-
 
     if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
 
@@ -322,7 +310,6 @@ const EvaluationResultPage = () => {
                 </div>
                 
                 <div className="flex flex-col sm:flex-row items-center gap-3">
-                    {/* Reference Scheme Selector */}
                     <div className="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg border shadow-sm w-full sm:w-auto">
                         <Filter className="w-4 h-4 text-gray-500" />
                         <span className="text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Summary Logic:</span>
@@ -336,7 +323,6 @@ const EvaluationResultPage = () => {
                         </select>
                     </div>
 
-                    {/* NEW EXPORT BUTTON */}
                     <button 
                         onClick={handleExportToExcel}
                         disabled={!calculateData || calculateData.courseRows.length === 0}
@@ -367,7 +353,6 @@ const EvaluationResultPage = () => {
                             </thead>
                             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                 
-                                {/* COURSE ROWS */}
                                 {calculateData.courseRows.map(({ course, attainment }) => (
                                     <tr key={course.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
                                         <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-700 dark:text-gray-200 border-r border-gray-300 dark:border-gray-600">
@@ -386,7 +371,6 @@ const EvaluationResultPage = () => {
                                     </tr>
                                 ))}
 
-                                {/* SUMMARY ROWS */}
                                 {calculateData.summaryRows.map((row, idx) => (
                                     <tr key={idx} className={row.bg || ''}>
                                         <td className={`px-4 py-3 whitespace-nowrap text-sm ${row.bold ? 'font-bold text-gray-900 dark:text-white' : 'font-medium text-gray-600 dark:text-gray-300'} border-r border-gray-300 dark:border-gray-600 border-t`}>

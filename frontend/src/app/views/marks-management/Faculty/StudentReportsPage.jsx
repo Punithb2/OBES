@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { Download, Loader2, Search, Filter, Eye } from 'lucide-react'; 
 import { useNavigate } from 'react-router-dom'; 
 
@@ -25,10 +25,8 @@ const StudentReportsPage = () => {
         if (!user) return;
         setLoading(true);
         try {
-            const res = await api.get('/courses/');
-        
-            // Safely extract data handling Django's paginated responses
-            const coursesData = res.data.results || res.data;
+            // RECURSIVE FETCH IMPLEMENTED HERE
+            const coursesData = await fetchAllPages('/courses/');
         
             // Ensure it's an array before filtering
             const myCourses = Array.isArray(coursesData) 
@@ -46,21 +44,17 @@ const StudentReportsPage = () => {
       fetchCourses();
     }, [user]);
 
-    // 2. Fetch Students & Marks for the Selected Course (ADDED FIX)
+    // 2. Fetch Students & Marks for the Selected Course
     useEffect(() => {
         const fetchStudentData = async () => {
             if (!selectedCourseId) return;
             setLoading(true);
             try {
-                // Fetch students and filtered marks simultaneously
-                const [studentsRes, marksRes] = await Promise.all([
-                    api.get('/students/'),
-                    api.get(`/marks/?course=${selectedCourseId}`)
+                // RECURSIVE FETCH IMPLEMENTED HERE
+                const [fetchedStudents, fetchedMarks] = await Promise.all([
+                    fetchAllPages('/students/'),
+                    fetchAllPages(`/marks/?course=${selectedCourseId}`)
                 ]);
-
-                // Safely handle paginated backend responses
-                const fetchedStudents = studentsRes.data.results || studentsRes.data;
-                const fetchedMarks = marksRes.data.results || marksRes.data;
 
                 // Type-Safe Filtering: Convert both sides to Strings to guarantee a match
                 const courseStudents = Array.isArray(fetchedStudents) 

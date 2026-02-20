@@ -30,7 +30,6 @@ api.interceptors.response.use(
         const refreshToken = localStorage.getItem('refreshToken');
         
         if (!refreshToken) {
-            // No refresh token? User must log in again.
             throw new Error("No refresh token available");
         }
 
@@ -49,7 +48,6 @@ api.interceptors.response.use(
 
       } catch (refreshError) {
         console.error("Session expired. Please login again.", refreshError);
-        // Clear storage and redirect to login
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         window.location.href = '/session/signin';
@@ -60,5 +58,32 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+/**
+ * Helper function to recursively fetch all paginated data from Django Rest Framework.
+ * It loops through the `next` URL provided by DRF until all pages are retrieved.
+ */
+export const fetchAllPages = async (endpoint) => {
+  let results = [];
+  let nextUrl = endpoint;
+
+  while (nextUrl) {
+    // Axios will automatically handle absolute URLs provided by DRF's `next` field
+    const response = await api.get(nextUrl);
+    const data = response.data;
+
+    // Check if the response is paginated (contains a 'results' array)
+    if (data && data.results) {
+      results = [...results, ...data.results];
+      nextUrl = data.next; // DRF returns null when there are no more pages
+    } else {
+      // Fallback in case the endpoint is not actually paginated
+      results = Array.isArray(data) ? data : [data];
+      nextUrl = null;
+    }
+  }
+  
+  return results;
+};
 
 export default api;

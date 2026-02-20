@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api';
 import { Icons } from '../shared/icons';
+import ConfirmationModal from '../shared/ConfirmationModal';
 
 // --- Department Modal ---
 const DeptModal = ({ isOpen, onClose, onSave, dept = null }) => {
@@ -66,14 +67,14 @@ const DepartmentManagement = () => {
     const [departments, setDepartments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState({ isOpen: false, dept: null });
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false, idToDelete: null });
 
     const fetchDepartments = async () => {
         try {
             setLoading(true);
-            const res = await api.get('/departments/');
+            // RECURSIVE FETCH IMPLEMENTED HERE
+            const fetchedDepts = await fetchAllPages('/departments/');
             
-            // FIX: Safely extract paginated results
-            const fetchedDepts = res.data.results || res.data;
             setDepartments(Array.isArray(fetchedDepts) ? fetchedDepts : []);
             
         } catch (error) {
@@ -100,12 +101,18 @@ const DepartmentManagement = () => {
         }
     };
 
-    const handleDelete = async (id) => {
-        if(window.confirm("Delete this department? Ensure no users/courses are assigned to it first.")) {
-            try {
-                await api.delete(`/departments/${id}/`);
-                fetchDepartments();
-            } catch (error) { console.error(error); }
+    const openDeleteModal = (id) => {
+        setDeleteModal({ isOpen: true, idToDelete: id });
+    };
+
+    const confirmDelete = async () => {
+        try {
+            await api.delete(`/departments/${deleteModal.idToDelete}/`);
+            fetchDepartments();
+        } catch (error) { 
+            console.error(error); 
+        } finally {
+            setDeleteModal({ isOpen: false, idToDelete: null });
         }
     };
 
@@ -113,6 +120,16 @@ const DepartmentManagement = () => {
         <div className="p-6">
             <DeptModal isOpen={modal.isOpen} onClose={() => setModal({ isOpen: false, dept: null })} onSave={handleSave} dept={modal.dept} />
             
+            {/* 4. RENDER DELETE MODAL */}
+            {deleteModal.isOpen && (
+                <ConfirmationModal 
+                    title="Delete Department"
+                    message="Delete this department? Ensure no users/courses are assigned to it first."
+                    onConfirm={confirmDelete}
+                    onCancel={() => setDeleteModal({ isOpen: false, idToDelete: null })}
+                />
+            )}
+
             <Card>
                 <CardHeader>
                     <div className="flex justify-between items-center">
@@ -145,7 +162,7 @@ const DepartmentManagement = () => {
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{dept.name}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <button onClick={() => setModal({ isOpen: true, dept })} className="text-primary-600 hover:text-primary-800 dark:text-primary-400 mr-4">Edit</button>
-                                            <button onClick={() => handleDelete(dept.id)} className="text-red-600 hover:text-red-800 dark:text-red-400">Delete</button>
+                                            <button onClick={() => openDeleteModal(dept.id)} className="text-red-600 hover:text-red-800 dark:text-red-400">Delete</button>
                                         </td>
                                     </tr>
                                 ))}

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '../shared/Card';
-import api from '../../../services/api';
-import { Loader2, Filter, Building2, Search, Download } from 'lucide-react'; // Added Download Icon
-import * as XLSX from 'xlsx-js-style'; // NEW: For Styled Excel Export
+import api, { fetchAllPages } from '../../../services/api'; 
+import { Loader2, Filter, Building2, Search, Download } from 'lucide-react'; 
+import * as XLSX from 'xlsx-js-style'; 
 
 const DepartmentAttainmentPage = () => {
     const [loading, setLoading] = useState(false);
@@ -26,19 +26,14 @@ const DepartmentAttainmentPage = () => {
     useEffect(() => {
         const fetchInitData = async () => {
             try {
-                const [deptRes, schemesRes] = await Promise.all([
-                    api.get('/departments/'),
-                    api.get('/schemes/')
+                const [fetchedDepts, fetchedSchemes] = await Promise.all([
+                    fetchAllPages('/departments/'),
+                    fetchAllPages('/schemes/')
                 ]);
-                
-                // Safely handle paginated responses
-                const fetchedDepts = deptRes.data.results || deptRes.data || [];
-                const fetchedSchemes = schemesRes.data.results || schemesRes.data || [];
 
                 setDepartments(Array.isArray(fetchedDepts) ? fetchedDepts : []);
                 setSchemes(Array.isArray(fetchedSchemes) ? fetchedSchemes : []);
                 
-                // Default to first scheme for summary logic
                 if (Array.isArray(fetchedSchemes) && fetchedSchemes.length > 0) {
                     setSelectedSchemeId(fetchedSchemes[0].id);
                 }
@@ -56,21 +51,13 @@ const DepartmentAttainmentPage = () => {
         const fetchDeptData = async () => {
             setLoading(true);
             try {
-                // Fetch Configuration Data
-                const [coursesRes, posRes, psosRes, matrixRes, surveyRes] = await Promise.all([
-                    api.get(`/courses/?department=${selectedDeptId}`),
-                    api.get('/pos/'),
-                    api.get('/psos/'),
-                    api.get(`/articulation-matrix/?department=${selectedDeptId}`).catch(() => ({ data: { results: [] } })),
-                    api.get(`/surveys/?department=${selectedDeptId}`).catch(() => ({ data: { results: [] } }))
+                const [fetchedCourses, fetchedPos, fetchedPsos, fetchedMatrix, fetchedSurveys] = await Promise.all([
+                    fetchAllPages(`/courses/?department=${selectedDeptId}`),
+                    fetchAllPages('/pos/'),
+                    fetchAllPages('/psos/'),
+                    fetchAllPages(`/articulation-matrix/?department=${selectedDeptId}`).catch(() => []),
+                    fetchAllPages(`/surveys/?department=${selectedDeptId}`).catch(() => [])
                 ]);
-
-                // Safely extract paginated results
-                const fetchedCourses = coursesRes.data.results || coursesRes.data || [];
-                const fetchedPos = posRes.data.results || posRes.data || [];
-                const fetchedPsos = psosRes.data.results || psosRes.data || [];
-                const fetchedMatrix = matrixRes.data.results || matrixRes.data || [];
-                const fetchedSurveys = surveyRes.data.results || surveyRes.data || [];
 
                 // Sort Outcomes
                 const sortById = (a, b) => {
@@ -142,13 +129,16 @@ const DepartmentAttainmentPage = () => {
             const courseMatrix = matrix[course.id] || {};
             const poAttainment = {};
 
+            const courseSchemeRules = course.scheme_details?.settings || {};
+            const normFactor = courseSchemeRules.po_calculation?.normalization_factor || 3;
+
             // Multiply Backend Final Score Index by Articulation Matrix Mapping
             outcomes.forEach(outcome => {
                 let wSum = 0, wCount = 0;
                 coData.forEach(coItem => {
                     const mapVal = parseFloat(courseMatrix[coItem.co]?.[outcome.id]);
                     if (!isNaN(mapVal)) {
-                        wSum += (mapVal * coItem.score_index) / 3;
+                        wSum += (mapVal * coItem.score_index) / normFactor;
                         wCount++;
                     }
                 });
@@ -190,9 +180,10 @@ const DepartmentAttainmentPage = () => {
 
         // 4. Final Summary based on REFERENCE SCHEME
         const refScheme = schemes.find(s => String(s.id) === String(selectedSchemeId));
-        const refRules = refScheme?.settings?.attainment_rules || {};
-        const wDirectProgram = (refRules.finalWeightage?.direct || 80) / 100;
-        const wIndirectProgram = (refRules.finalWeightage?.indirect || 20) / 100;
+        const refRules = refScheme?.settings || {};
+        
+        const wDirectProgram = (refRules.weightage?.direct ?? 80) / 100;
+        const wIndirectProgram = (refRules.weightage?.indirect ?? 20) / 100;
 
         const rowC = {}; 
         const rowD = {};
@@ -239,10 +230,9 @@ const DepartmentAttainmentPage = () => {
         const selectedDept = departments.find(d => String(d.id) === String(selectedDeptId));
         const deptName = selectedDept ? selectedDept.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Department';
 
-        // Define Styles
         const headerStyle = {
             font: { bold: true, color: { rgb: "000000" }, sz: 11 },
-            fill: { fgColor: { rgb: "E2E8F0" } }, // Gray-200
+            fill: { fgColor: { rgb: "E2E8F0" } }, 
             alignment: { horizontal: "center", vertical: "center" },
             border: {
                 top: { style: "thin", color: { rgb: "94A3B8" } },
@@ -264,24 +254,20 @@ const DepartmentAttainmentPage = () => {
 
         const highlightStyle = {
             font: { bold: true },
-            fill: { fgColor: { rgb: "FEF08A" } }, // Yellow
+            fill: { fgColor: { rgb: "FEF08A" } }, 
             ...dataStyle
         };
 
         const finalRowStyle = {
             font: { bold: true, color: { rgb: "000000" } },
-            fill: { fgColor: { rgb: "DCFCE7" } }, // Green
+            fill: { fgColor: { rgb: "DCFCE7" } }, 
             ...dataStyle
         };
 
-        // Construct Data Array
         const excelData = [];
-        
-        // Headers
         const headerRow = ["COMPONENT", ...outcomes.map(o => o.id)];
         excelData.push(headerRow);
 
-        // Course Rows
         calculateData.courseRows.forEach(({ course, attainment }) => {
             const row = [`${course.code}`];
             outcomes.forEach(o => {
@@ -291,7 +277,6 @@ const DepartmentAttainmentPage = () => {
             excelData.push(row);
         });
 
-        // Summary Rows
         calculateData.summaryRows.forEach((summaryRow) => {
             const row = [summaryRow.label];
             outcomes.forEach(o => {
@@ -305,10 +290,8 @@ const DepartmentAttainmentPage = () => {
             excelData.push(row);
         });
 
-        // Generate Sheet
         const ws = XLSX.utils.aoa_to_sheet(excelData);
 
-        // Apply Styles
         for (let R = 0; R < excelData.length; ++R) {
             for (let C = 0; C < excelData[R].length; ++C) {
                 const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
@@ -317,7 +300,6 @@ const DepartmentAttainmentPage = () => {
                 if (R === 0) {
                     ws[cellRef].s = headerStyle;
                 } else if (R >= calculateData.courseRows.length + 1) {
-                    // Summary Rows Styling
                     const summaryLabel = excelData[R][0];
                     if (summaryLabel.includes('[A]') || summaryLabel.includes('[B]')) {
                         ws[cellRef].s = highlightStyle;
@@ -327,18 +309,15 @@ const DepartmentAttainmentPage = () => {
                         ws[cellRef].s = { ...dataStyle, font: { bold: C === 0 } }; 
                     }
                 } else {
-                    // Normal Course Rows
                     ws[cellRef].s = { ...dataStyle, alignment: { horizontal: C === 0 ? "left" : "center" } };
                 }
             }
         }
 
-        // Adjust column widths
         const wscols = [{ wch: 40 }];
         outcomes.forEach(() => wscols.push({ wch: 10 }));
         ws['!cols'] = wscols;
 
-        // Create Workbook and save
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Department Attainment");
         XLSX.writeFile(wb, `${deptName}_Attainment_Report.xlsx`);
@@ -354,18 +333,18 @@ const DepartmentAttainmentPage = () => {
                     </p>
                 </div>
 
-                {/* CONTROLS BAR */}
-                <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 items-center">
+                {/* CONTROLS BAR: FIXED ALIGNMENT */}
+                <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 items-end">
                     
-                    {/* Department Selector */}
                     <div className="flex-1 w-full">
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Select Department</label>
                         <div className="relative">
-                            <Building2 className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                            {/* Centered icon vertically */}
+                            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                             <select 
                                 value={selectedDeptId}
                                 onChange={(e) => setSelectedDeptId(e.target.value)}
-                                className="pl-10 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                className="pl-10 h-10 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                             >
                                 <option value="">-- Choose Department --</option>
                                 {departments.map(d => (
@@ -375,15 +354,15 @@ const DepartmentAttainmentPage = () => {
                         </div>
                     </div>
 
-                    {/* Reference Scheme Selector */}
                     <div className="flex-1 w-full">
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Summary Logic (Weights)</label>
                         <div className="relative">
-                            <Filter className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                            {/* Centered icon vertically */}
+                            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                             <select 
                                 value={selectedSchemeId}
                                 onChange={(e) => setSelectedSchemeId(e.target.value)}
-                                className="pl-10 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                className="pl-10 h-10 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                                 disabled={!selectedDeptId}
                             >
                                 {schemes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -391,12 +370,11 @@ const DepartmentAttainmentPage = () => {
                         </div>
                     </div>
 
-                    {/* NEW EXPORT BUTTON */}
-                    <div className="w-full md:w-auto self-end">
+                    <div className="w-full md:w-auto">
                         <button 
                             onClick={handleExportToExcel}
                             disabled={!calculateData || calculateData.courseRows.length === 0}
-                            className="flex items-center justify-center w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium shadow-sm disabled:opacity-50 whitespace-nowrap"
+                            className="flex items-center justify-center h-10 w-full px-5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium shadow-sm disabled:opacity-50 whitespace-nowrap"
                             title="Export to Excel"
                         >
                             <Download className="w-4 h-4 sm:mr-2" />

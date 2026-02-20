@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { Icons } from '../shared/icons';
+import ConfirmationModal from '../shared/ConfirmationModal';
 
 // --- Admin Modal ---
 const AdminModal = ({ isOpen, onClose, onSave, admin = null, departments = [] }) => {
@@ -64,19 +65,17 @@ const AdminManagement = () => {
     const [departments, setDepartments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState({ isOpen: false, admin: null });
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false, idToDelete: null });
 
     const fetchData = async () => {
         try {
             setLoading(true);
-            const [usersRes, deptRes] = await Promise.all([
-                api.get('/users/?role=admin'), 
-                api.get('/departments/')
+            // RECURSIVE FETCH IMPLEMENTED HERE
+            const [fetchedAdmins, fetchedDepts] = await Promise.all([
+                fetchAllPages('/users/?role=admin'), 
+                fetchAllPages('/departments/')
             ]);
             
-            // FIX: Safely extract data handling Django's paginated responses
-            const fetchedAdmins = usersRes.data.results || usersRes.data;
-            const fetchedDepts = deptRes.data.results || deptRes.data;
-
             setAdmins(Array.isArray(fetchedAdmins) ? fetchedAdmins : []);
             setDepartments(Array.isArray(fetchedDepts) ? fetchedDepts : []);
 
@@ -113,13 +112,18 @@ const AdminManagement = () => {
         }
     };
 
-    const handleDelete = async (id) => {
-        if(window.confirm("Delete this admin?")) {
-            try { 
-                await api.delete(`/users/${id}/`); 
-                fetchData(); 
-            } 
-            catch (error) { console.error(error); }
+    const openDeleteModal = (id) => {
+        setDeleteModal({ isOpen: true, idToDelete: id });
+    };
+
+    const confirmDelete = async () => {
+        try { 
+            await api.delete(`/users/${deleteModal.idToDelete}/`); 
+            fetchData(); 
+        } 
+        catch (error) { console.error(error); }
+        finally {
+            setDeleteModal({ isOpen: false, idToDelete: null });
         }
     };
 
@@ -129,6 +133,15 @@ const AdminManagement = () => {
         <div className="p-6">
             <AdminModal isOpen={modal.isOpen} onClose={() => setModal({ isOpen: false, admin: null })} onSave={handleSave} admin={modal.admin} departments={departments} />
             
+            {deleteModal.isOpen && (
+                <ConfirmationModal 
+                    title="Delete Admin"
+                    message="Are you sure you want to delete this admin? They will lose access to the system."
+                    onConfirm={confirmDelete}
+                    onCancel={() => setDeleteModal({ isOpen: false, idToDelete: null })}
+                />
+            )}
+
             <Card>
                 <CardHeader>
                     <div className="flex justify-between items-center">
@@ -177,7 +190,7 @@ const AdminManagement = () => {
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                     <button onClick={() => setModal({ isOpen: true, admin })} className="text-primary-600 hover:text-primary-800 dark:text-primary-400 mr-4">Edit</button>
-                                                    <button onClick={() => handleDelete(admin.id)} className="text-red-600 hover:text-red-800 dark:text-red-400">Delete</button>
+                                                    <button onClick={() => openDeleteModal(admin.id)} className="text-red-600 hover:text-red-800 dark:text-red-400">Delete</button>
                                                 </td>
                                             </tr>
                                         ))

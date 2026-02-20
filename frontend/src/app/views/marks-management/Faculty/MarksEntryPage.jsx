@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api'; // IMPORTED HELPER HERE
 import { Save, Pencil, Unlock, Check, Download, FileSpreadsheet, TrendingUp, Loader2 } from 'lucide-react';
 
 // --- COMPARISON MODAL ---
@@ -101,9 +101,8 @@ const MarksEntryPage = () => {
     const fetchCourses = async () => {
         if (!user) return;
         try {
-            // Updated to handle pagination if Course endpoint is paginated
-            const res = await api.get(`/courses/`);
-            const coursesData = res.data.results || res.data;
+            // USING THE NEW RECURSIVE HELPER
+            const coursesData = await fetchAllPages(`/courses/`);
             const myCourses = coursesData.filter(c => String(c.assigned_faculty) === String(user.id));
             setCourses(myCourses);
             
@@ -197,15 +196,13 @@ const MarksEntryPage = () => {
     if (!selectedCourseId || !selectedAssessmentName || !currentToolConfig) return;
     setLoading(true);
     try {
-        // Handle pagination for students
-        const studentsRes = await api.get(`/students/`);
-        const allStudents = studentsRes.data.results || studentsRes.data;
+        // USING THE NEW RECURSIVE HELPER
+        const allStudents = await fetchAllPages(`/students/`);
         const students = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
         setCurrentStudents(students);
 
-        // PERFORMANCE FIX: Fetch ONLY the marks for this specific course
-        const marksRes = await api.get(`/marks/?course=${selectedCourseId}`);
-        const allMarks = marksRes.data.results || marksRes.data;
+        // USING THE NEW RECURSIVE HELPER
+        const allMarks = await fetchAllPages(`/marks/?course=${selectedCourseId}`);
         
         const existingMarks = allMarks.filter(m => m.assessment_name === selectedAssessmentName);
 
@@ -283,7 +280,6 @@ const MarksEntryPage = () => {
     const config = dynamicConfig || currentToolConfig;
     const newMarks = JSON.parse(JSON.stringify(marks));
     
-    // FIX 1: Use '??' instead of '||' so if a CO is genuinely out of 0, it doesn't fall back to 30.
     const questionMax = config.questions.find(q => q.q === questionIdentifier)?.max ?? config.total;
     
     if (value === '') {
@@ -291,12 +287,10 @@ const MarksEntryPage = () => {
     } else {
         let numValue = parseInt(value, 10);
         if (!isNaN(numValue)) {
-            // Cap the individual question score to its designated max
             numValue = Math.max(0, Math.min(numValue, questionMax));
             
             if (!newMarks[studentId]) newMarks[studentId] = {};
             
-            // FIX 2: Check the CUMULATIVE total so it cannot exceed the test's total max marks
             let otherQuestionsTotal = 0;
             config.questions.forEach(q => {
                 if (q.q !== questionIdentifier && !q.q.startsWith('_')) {
@@ -304,11 +298,8 @@ const MarksEntryPage = () => {
                 }
             });
 
-            // If adding this new score pushes the total over the limit, dial it back to the max possible
             if (otherQuestionsTotal + numValue > config.total) {
                 numValue = Math.max(0, config.total - otherQuestionsTotal);
-                // Optional: You can alert the user here if you want
-                // alert(`Total marks cannot exceed ${config.total}`);
             }
 
             newMarks[studentId][questionIdentifier] = numValue;

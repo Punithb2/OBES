@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { Loader2, Save, AlertCircle, CheckCircle, X } from 'lucide-react';
 
 // --- CUSTOM MODAL ---
@@ -51,10 +51,10 @@ const IndirectCoAttainmentPage = () => {
             if (!user) return;
             setLoading(true);
             try {
-                const res = await api.get('/courses/');
+                // RECURSIVE FETCH IMPLEMENTED HERE
+                const fetchedCourses = await fetchAllPages('/courses/');
                 
-                // Safely handle paginated responses
-                const fetchedCourses = res.data.results || res.data;
+                // Safely handle filtering
                 const myCourses = Array.isArray(fetchedCourses) 
                     ? fetchedCourses.filter(c => String(c.assigned_faculty) === String(user.id))
                     : [];

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../sh
 import { Icons } from '../shared/icons';
 import api from '../../../services/api';
 import { Plus, Trash2, Save, X, Loader2, AlertCircle } from 'lucide-react';
+import ConfirmationModal from '../shared/ConfirmationModal'; // IMPORT MODAL
 
 // --- INTERNAL MODAL COMPONENT ---
 const SchemeCreationModal = ({ isOpen, onClose, onCreate }) => {
@@ -18,17 +19,16 @@ const SchemeCreationModal = ({ isOpen, onClose, onCreate }) => {
         setIsSubmitting(true);
         try {
             await onCreate(formData);
-            setFormData({ id: '', name: '' }); // Reset form
+            setFormData({ id: '', name: '' }); 
         } catch (error) {
             console.error(error);
-            // Error handling is done in parent
         } finally {
             setIsSubmitting(false);
         }
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4 p-6 transform transition-all scale-100">
                 <div className="flex justify-between items-center mb-5 border-b dark:border-gray-700 pb-3">
                     <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -106,13 +106,33 @@ const AdminConfigurationPage = () => {
     const [loading, setLoading] = useState(true);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
-    // Default Configuration Templates (Mapped to Phase 1 JSON Schema)
+    // --- UI MODAL STATE ---
+    const [uiModal, setUiModal] = useState({ isOpen: false, title: '', message: '', isAlert: false, theme: 'primary', confirmText: 'OK', onConfirm: null });
+
+    const showAlert = (title, message, theme = 'primary') => {
+        setUiModal({
+            isOpen: true, title, message, isAlert: true, theme, confirmText: 'OK',
+            onConfirm: () => setUiModal(prev => ({ ...prev, isOpen: false }))
+        });
+    };
+
+    const showConfirm = (title, message, onConfirmAction) => {
+        setUiModal({
+            isOpen: true, title, message, isAlert: false, theme: 'danger', confirmText: 'Delete',
+            onConfirm: () => {
+                onConfirmAction();
+                setUiModal(prev => ({ ...prev, isOpen: false }));
+            }
+        });
+    };
+
+    // Default Configuration Templates
     const defaultRules = {
         pass_criteria: 50,
         attainment_levels: { level_3: 70, level_2: 60, level_1: 50 },
         weightage: { direct: 80, indirect: 20 },
         po_calculation: { normalization_factor: 3 },
-        direct_split: { cie: 50, see: 50 } // Custom addition for UI
+        direct_split: { cie: 50, see: 50 } 
     };
 
     const defaultTools = [
@@ -142,26 +162,22 @@ const AdminConfigurationPage = () => {
                 api.get('/psos/')
             ]);
 
-            // Fix: Extract data from Django's paginated 'results' array
             const fetchedSchemes = schemesRes.data.results || schemesRes.data;
             const fetchedPos = posRes.data.results || posRes.data;
             const fetchedPsos = psosRes.data.results || psosRes.data;
 
             setSchemes(fetchedSchemes);
 
-            // Select first scheme if none selected
             if (fetchedSchemes.length > 0 && !selectedSchemeId) {
                 loadSchemeData(fetchedSchemes[0]);
             }
 
-            // Handle Outcomes Sorting
             const sortById = (a, b) => {
                 const numA = parseInt(a.id.match(/\d+/)?.[0] || 0);
                 const numB = parseInt(b.id.match(/\d+/)?.[0] || 0);
                 return numA - numB;
             };
             
-            // Apply sorting to the correctly extracted arrays
             setPos(fetchedPos.sort(sortById));
             setPsos(fetchedPsos.sort(sortById));
 
@@ -176,7 +192,6 @@ const AdminConfigurationPage = () => {
         setSelectedSchemeId(scheme.id);
         const settings = scheme.settings || {};
         
-        // Merge fetched data with defaults to prevent UI crashes if fields are missing
         setAttainmentRules({
             pass_criteria: settings.pass_criteria || defaultRules.pass_criteria,
             attainment_levels: settings.attainment_levels || defaultRules.attainment_levels,
@@ -195,7 +210,6 @@ const AdminConfigurationPage = () => {
         if (scheme) loadSchemeData(scheme);
     };
 
-    // --- Create New Scheme Handler (Called from Modal) ---
     const handleCreateScheme = async (formData) => {
         const payload = {
             id: formData.id,
@@ -216,15 +230,14 @@ const AdminConfigurationPage = () => {
             setSchemes([...schemes, newScheme]);
             loadSchemeData(newScheme);
             setIsCreateModalOpen(false);
-            alert(`Scheme "${newScheme.name}" created successfully!`);
+            showAlert('Success', `Scheme "${newScheme.name}" created successfully!`, 'success');
         } catch (error) {
             console.error("Failed to create scheme", error);
-            alert("Failed to create scheme. Ensure ID is unique.");
+            showAlert('Error', 'Failed to create scheme. Ensure the Scheme ID is unique.', 'danger');
             throw error;
         }
     };
 
-    // --- Update Handler (PATCH) ---
     const handleSave = async () => {
         if (!selectedSchemeId) return;
 
@@ -241,33 +254,38 @@ const AdminConfigurationPage = () => {
 
         try {
             await api.patch(`/schemes/${selectedSchemeId}/`, payload);
-            alert("Configuration saved successfully.");
+            showAlert('Saved Successfully', 'The configuration has been updated for this scheme.', 'success');
         } catch (error) {
             console.error("Failed to save configuration", error);
-            alert("Failed to save configuration.");
+            showAlert('Error', 'Failed to save configuration. Please try again.', 'danger');
         }
     };
 
-    const handleDelete = async () => {
+    const handleDelete = () => {
         if (!selectedSchemeId) return;
-        if (!window.confirm("Are you sure? This scheme will be removed from all linked courses.")) return;
 
-        try {
-            await api.delete(`/schemes/${selectedSchemeId}/`);
-            const remaining = schemes.filter(s => s.id !== selectedSchemeId);
-            setSchemes(remaining);
-            
-            if (remaining.length > 0) {
-                loadSchemeData(remaining[0]);
-            } else {
-                setSelectedSchemeId('');
-                setAttainmentRules(defaultRules);
+        showConfirm(
+            "Delete Scheme", 
+            "Are you sure you want to delete this scheme? This will affect calculations for all courses linked to it.",
+            async () => {
+                try {
+                    await api.delete(`/schemes/${selectedSchemeId}/`);
+                    const remaining = schemes.filter(s => s.id !== selectedSchemeId);
+                    setSchemes(remaining);
+                    
+                    if (remaining.length > 0) {
+                        loadSchemeData(remaining[0]);
+                    } else {
+                        setSelectedSchemeId('');
+                        setAttainmentRules(defaultRules);
+                    }
+                    showAlert('Deleted', 'Scheme deleted successfully.', 'success');
+                } catch (error) {
+                    console.error("Delete failed", error);
+                    showAlert('Error', 'Failed to delete scheme.', 'danger');
+                }
             }
-            alert("Scheme deleted.");
-        } catch (error) {
-            console.error("Delete failed", error);
-            alert("Failed to delete scheme.");
-        }
+        );
     };
 
     // --- Rule Update Helpers ---
@@ -303,14 +321,25 @@ const AdminConfigurationPage = () => {
     return (
         <div className="p-6 space-y-6 pb-10">
             
-            {/* --- MODAL INJECTION --- */}
             <SchemeCreationModal 
                 isOpen={isCreateModalOpen} 
                 onClose={() => setIsCreateModalOpen(false)}
                 onCreate={handleCreateScheme}
             />
 
-            {/* Header Area */}
+            {/* SHARED CONFIRMATION MODAL */}
+            {uiModal.isOpen && (
+                <ConfirmationModal 
+                    title={uiModal.title}
+                    message={uiModal.message}
+                    isAlert={uiModal.isAlert}
+                    theme={uiModal.theme}
+                    confirmText={uiModal.confirmText}
+                    onConfirm={uiModal.onConfirm}
+                    onCancel={() => setUiModal(prev => ({ ...prev, isOpen: false }))}
+                />
+            )}
+
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900 dark:text-white">System Configuration</h1>
@@ -318,7 +347,6 @@ const AdminConfigurationPage = () => {
                 </div>
                 
                 <div className="flex gap-3 items-center bg-white dark:bg-gray-800 p-2 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                    {/* Scheme Selector */}
                     <div className="relative">
                         <select 
                             value={selectedSchemeId}
@@ -331,7 +359,6 @@ const AdminConfigurationPage = () => {
                         </select>
                     </div>
 
-                    {/* Create Button */}
                     <button 
                         onClick={() => setIsCreateModalOpen(true)}
                         className="p-2 text-primary-600 bg-primary-50 hover:bg-primary-100 rounded-lg border border-primary-200 transition-colors"
@@ -340,7 +367,6 @@ const AdminConfigurationPage = () => {
                         <Plus className="h-5 w-5" />
                     </button>
 
-                    {/* Delete Button */}
                     {selectedSchemeId && (
                         <button 
                             onClick={handleDelete}
@@ -351,10 +377,8 @@ const AdminConfigurationPage = () => {
                         </button>
                     )}
                     
-                    {/* Separator */}
                     <div className="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
 
-                    {/* Save Button */}
                     <button 
                         onClick={handleSave}
                         className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-bold shadow-sm transition-colors"
@@ -366,9 +390,7 @@ const AdminConfigurationPage = () => {
 
             {selectedSchemeId ? (
                 <>
-                    {/* --- 1. ATTAINMENT CRITERIA --- */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* A. Pass Criteria */}
                         <Card>
                             <CardHeader>
                                 <CardTitle>Student Pass Criteria</CardTitle>
@@ -393,7 +415,6 @@ const AdminConfigurationPage = () => {
                             </CardContent>
                         </Card>
 
-                        {/* B. Attainment Level Thresholds */}
                         <Card>
                             <CardHeader>
                                 <CardTitle>Class Performance Levels</CardTitle>
@@ -420,7 +441,6 @@ const AdminConfigurationPage = () => {
                             </CardContent>
                         </Card>
 
-                        {/* C. Direct Attainment Split */}
                         <Card>
                             <CardHeader>
                                 <CardTitle>Direct Attainment Formula</CardTitle>
@@ -454,7 +474,6 @@ const AdminConfigurationPage = () => {
                             </CardContent>
                         </Card>
 
-                        {/* D. Final PO Attainment Split */}
                         <Card>
                             <CardHeader>
                                 <CardTitle>Final PO Attainment Formula</CardTitle>
@@ -501,7 +520,6 @@ const AdminConfigurationPage = () => {
                         </Card>
                     </div>
 
-                    {/* --- 2. INDIRECT TOOLS CONFIGURATION --- */}
                     <div className="mt-8">
                         <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Indirect Assessment Tools</h2>
                         <Card>
@@ -553,7 +571,6 @@ const AdminConfigurationPage = () => {
                 </div>
             )}
             
-            {/* --- 3. OUTCOME DEFINITIONS --- */}
             <div className="mt-8">
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Outcome Definitions</h2>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
-import api from '../../../services/api';
-import { Loader2, User, BookOpen, Download } from 'lucide-react'; // Changed Printer to Download
+import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
+import { Loader2, User, BookOpen, Download } from 'lucide-react'; 
 import { useLocation } from 'react-router-dom'; 
 import {
   Chart as ChartJS,
@@ -14,8 +14,8 @@ import {
   Legend
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
-import html2canvas from 'html2canvas'; // NEW: For PDF
-import jsPDF from 'jspdf';             // NEW: For PDF
+import html2canvas from 'html2canvas'; 
+import jsPDF from 'jspdf';             
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -23,7 +23,7 @@ const StudentIndividualReportPage = () => {
     const { user } = useAuth();
     const location = useLocation(); 
     const [loading, setLoading] = useState(true);
-    const [exporting, setExporting] = useState(false); // State for PDF generation
+    const [exporting, setExporting] = useState(false); 
 
     // Data States
     const [courses, setCourses] = useState([]);
@@ -40,17 +40,12 @@ const StudentIndividualReportPage = () => {
             if (!user) return;
             setLoading(true);
             try {
-                // Fetch all required data
-                const [coursesRes, studentsRes, marksRes] = await Promise.all([
-                    api.get('/courses/'),
-                    api.get('/students/'),
-                    api.get('/marks/') 
+                // RECURSIVE FETCH IMPLEMENTED HERE
+                const [fetchedCourses, fetchedStudents, fetchedMarks] = await Promise.all([
+                    fetchAllPages('/courses/'),
+                    fetchAllPages('/students/'),
+                    fetchAllPages('/marks/') 
                 ]);
-
-                // Safely extract data from Django's paginated responses
-                const fetchedCourses = coursesRes.data.results || coursesRes.data;
-                const fetchedStudents = studentsRes.data.results || studentsRes.data;
-                const fetchedMarks = marksRes.data.results || marksRes.data;
 
                 // Filter courses for the logged-in faculty
                 const myCourses = Array.isArray(fetchedCourses)
@@ -204,14 +199,12 @@ const StudentIndividualReportPage = () => {
         };
     }, [reportData]);
 
-    // --- NEW: EXPORT TO PDF FUNCTION ---
     const handleExportToPDF = async () => {
         const element = document.getElementById('individual-report'); 
         if (!element) return;
 
         setExporting(true);
         try {
-            // Temporarily adjust styles for PDF capture
             const originalBg = element.style.backgroundColor;
             element.style.backgroundColor = '#ffffff'; 
 
@@ -285,7 +278,6 @@ const StudentIndividualReportPage = () => {
 
             {selectedCourse && selectedStudent && reportData ? (
                 
-                /* WRAP THE REPORT CONTENT IN THIS ID FOR PDF CAPTURE */
                 <div id="individual-report" className="space-y-6 bg-transparent dark:bg-gray-900 pb-4">
                     
                     {/* Header Info */}

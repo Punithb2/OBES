@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '../shared/Card';
-import api from '../../../services/api';
+import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { useAuth } from '../../../contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
@@ -22,18 +22,13 @@ const ProgramLevelMatrixPage = () => {
                 setLoading(true);
                 const deptId = user.department;
 
-                // A. Fetch Base Data (No more students or marks!)
-                const [coursesRes, posRes, psosRes, matrixRes] = await Promise.all([
-                    api.get(`/courses/?department=${deptId}`),
-                    api.get('/pos/'),
-                    api.get('/psos/'),
-                    api.get(`/articulation-matrix/?department=${deptId}`).catch(() => ({ data: { results: [] } }))
+                // A. Fetch Base Data using RECURSIVE HELPER
+                const [fetchedCourses, fetchedPos, fetchedPsos, fetchedMatrix] = await Promise.all([
+                    fetchAllPages(`/courses/?department=${deptId}`),
+                    fetchAllPages('/pos/'),
+                    fetchAllPages('/psos/'),
+                    fetchAllPages(`/articulation-matrix/?department=${deptId}`).catch(() => [])
                 ]);
-
-                const fetchedCourses = coursesRes.data.results || coursesRes.data || [];
-                const fetchedPos = posRes.data.results || posRes.data || [];
-                const fetchedPsos = psosRes.data.results || psosRes.data || [];
-                const fetchedMatrix = matrixRes.data.results || matrixRes.data || [];
 
                 const sortById = (a, b) => {
                     const numA = parseInt((a.id || '').match(/\d+/)?.[0] || 0);
@@ -57,6 +52,7 @@ const ProgramLevelMatrixPage = () => {
                 setMatrix(mBuilder);
 
                 // B. Fetch Pre-calculated Backend Reports for all courses
+                // (Still using api.get because it fetches a single object per course, not a list)
                 const reportsMap = {};
                 const reportPromises = safeCourses.map(course => 
                     api.get(`/reports/course-attainment/${course.id}/`).catch(() => null)
