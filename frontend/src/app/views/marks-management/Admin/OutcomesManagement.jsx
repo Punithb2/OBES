@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../sh
 import { Icons } from '../shared/icons';
 import ConfirmationModal from '../shared/ConfirmationModal'; 
 import api from '../../../services/api';
+import toast from 'react-hot-toast';
+import { TableSkeleton } from '../shared/SkeletonLoaders';
 
 const OutcomesManagement = () => {
     const [pos, setPos] = useState([]);
@@ -19,7 +21,7 @@ const OutcomesManagement = () => {
                 api.get('/psos/')  
             ]);
             
-            // FIX: Safely extract data handling Django's paginated responses
+            // Safely extract data handling Django's paginated responses
             const fetchedPos = posRes.data.results || posRes.data;
             const fetchedPsos = psosRes.data.results || psosRes.data;
             
@@ -30,12 +32,13 @@ const OutcomesManagement = () => {
                 return numA - numB;
             };
 
-            // FIX: Ensure they are arrays before sorting
+            // Ensure they are arrays before sorting
             setPos(Array.isArray(fetchedPos) ? [...fetchedPos].sort(sortById) : []);
             setPsos(Array.isArray(fetchedPsos) ? [...fetchedPsos].sort(sortById) : []);
             
         } catch (error) {
             console.error("Failed to load outcomes", error);
+            toast.error("Failed to load outcomes data."); // Added Error Toast
         } finally {
             setLoading(false);
         }
@@ -47,31 +50,39 @@ const OutcomesManagement = () => {
 
     // 2. Add Handlers (Auto-Generate ID)
     const handleAddPo = async () => {
-        try {
-            const nextNum = pos.length + 1;
-            const newPo = { 
-                id: `PO${nextNum}`, 
-                description: 'New Program Outcome' 
-            };
-            await api.post('/pos/', newPo); 
-            fetchData();
-        } catch (error) {
-            console.error("Failed to add PO", error);
-        }
+        const nextNum = pos.length + 1;
+        const newPo = { 
+            id: `PO${nextNum}`, 
+            description: 'New Program Outcome' 
+        };
+
+        // 2. USE TOAST.PROMISE
+        toast.promise(
+            api.post('/pos/', newPo),
+            {
+                loading: 'Adding PO...',
+                success: `Added ${newPo.id} successfully!`,
+                error: 'Failed to add PO.',
+            }
+        ).then(() => fetchData()).catch(err => console.error(err));
     };
 
     const handleAddPso = async () => {
-        try {
-            const nextNum = psos.length + 1;
-            const newPso = { 
-                id: `PSO${nextNum}`, 
-                description: 'New Program Specific Outcome' 
-            };
-            await api.post('/psos/', newPso); 
-            fetchData();
-        } catch (error) {
-            console.error("Failed to add PSO", error);
-        }
+        const nextNum = psos.length + 1;
+        const newPso = { 
+            id: `PSO${nextNum}`, 
+            description: 'New Program Specific Outcome' 
+        };
+
+        // 2. USE TOAST.PROMISE
+        toast.promise(
+            api.post('/psos/', newPso),
+            {
+                loading: 'Adding PSO...',
+                success: `Added ${newPso.id} successfully!`,
+                error: 'Failed to add PSO.',
+            }
+        ).then(() => fetchData()).catch(err => console.error(err));
     };
 
     // 3. Edit Handlers (Inline Edit with Auto-Save on Blur)
@@ -87,8 +98,11 @@ const OutcomesManagement = () => {
         try {
             const endpoint = type === 'po' ? '/pos' : '/psos';
             await api.patch(`${endpoint}/${id}/`, { description: newDescription });
+            // Note: We intentionally DO NOT show a success toast here so we don't spam 
+            // the user every time they click away from an input field (Silent Auto-Save).
         } catch (error) {
             console.error(`Failed to update ${type.toUpperCase()}`, error);
+            toast.error(`Failed to save changes for ${id}`); // Added Error Toast
         }
     };
 
@@ -101,16 +115,21 @@ const OutcomesManagement = () => {
         const { outcomeId, type } = deleteConfirmation;
         if (!outcomeId) return;
 
-        try {
-            const endpoint = type === 'po' ? '/pos' : '/psos';
-            await api.delete(`${endpoint}/${outcomeId}/`);
-            
+        const endpoint = type === 'po' ? '/pos' : '/psos';
+        
+        // 3. REPLACE ALERT WITH TOAST.PROMISE
+        toast.promise(
+            api.delete(`${endpoint}/${outcomeId}/`),
+            {
+                loading: 'Deleting...',
+                success: 'Outcome deleted successfully!',
+                error: 'Failed to delete. It might be linked to existing courses/matrices.',
+            }
+        ).then(() => {
             fetchData();
+        }).finally(() => {
             setDeleteConfirmation({ isOpen: false, outcomeId: null, type: null });
-        } catch (error) {
-            console.error("Failed to delete outcome", error);
-            alert("Failed to delete outcome. It might be linked to existing data.");
-        }
+        });
     };
 
     return (
@@ -123,6 +142,8 @@ const OutcomesManagement = () => {
                     onCancel={() => setDeleteConfirmation({ isOpen: false, outcomeId: null, type: null })}
                     title={`Delete ${deleteConfirmation.type === 'po' ? 'Program Outcome' : 'PSO'}`}
                     message="Are you sure you want to delete this outcome? This cannot be undone."
+                    theme="danger" // Ensure the delete button is red
+                    confirmText="Delete"
                 />
             )}
             
@@ -143,7 +164,7 @@ const OutcomesManagement = () => {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    {loading ? <div className="text-center py-4">Loading...</div> : (
+                    {loading ? <TableSkeleton rows={10} columns={3} /> : (
                         <div className="overflow-x-auto border rounded-lg dark:border-gray-700">
                             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                 <thead className="bg-gray-50 dark:bg-gray-700/50">
@@ -156,14 +177,14 @@ const OutcomesManagement = () => {
                                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                     {pos.map(po => (
                                         <tr key={po.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{po.id}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">{po.id}</td>
                                             <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300">
                                                 <input 
                                                     type="text"
                                                     value={po.description}
                                                     onChange={(e) => handleDescriptionChange(po.id, e.target.value, 'po')}
                                                     onBlur={(e) => handleDescriptionBlur(po.id, e.target.value, 'po')}
-                                                    className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary-500 focus:outline-none transition-colors py-1"
+                                                    className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary-500 focus:outline-none transition-colors py-1 dark:text-white"
                                                     placeholder="Enter description..."
                                                 />
                                             </td>
@@ -177,6 +198,9 @@ const OutcomesManagement = () => {
                                             </td>
                                         </tr>
                                     ))}
+                                    {pos.length === 0 && (
+                                        <tr><td colSpan="3" className="px-6 py-6 text-center text-sm text-gray-500">No Program Outcomes found.</td></tr>
+                                    )}
                                 </tbody>
                             </table>
                         </div>
@@ -200,7 +224,7 @@ const OutcomesManagement = () => {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    {loading ? <div className="text-center py-4">Loading...</div> : (
+                    {loading ? <TableSkeleton rows={10} columns={3} /> : (
                         <div className="overflow-x-auto border rounded-lg dark:border-gray-700">
                             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                 <thead className="bg-gray-50 dark:bg-gray-700/50">
@@ -213,14 +237,14 @@ const OutcomesManagement = () => {
                                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                     {psos.map(pso => (
                                         <tr key={pso.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{pso.id}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">{pso.id}</td>
                                             <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-300">
                                                  <input 
                                                     type="text"
                                                     value={pso.description}
                                                     onChange={(e) => handleDescriptionChange(pso.id, e.target.value, 'pso')}
                                                     onBlur={(e) => handleDescriptionBlur(pso.id, e.target.value, 'pso')}
-                                                    className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary-500 focus:outline-none transition-colors py-1"
+                                                    className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary-500 focus:outline-none transition-colors py-1 dark:text-white"
                                                     placeholder="Enter description..."
                                                 />
                                             </td>
@@ -234,6 +258,9 @@ const OutcomesManagement = () => {
                                             </td>
                                         </tr>
                                     ))}
+                                    {psos.length === 0 && (
+                                        <tr><td colSpan="3" className="px-6 py-6 text-center text-sm text-gray-500">No Program Specific Outcomes found.</td></tr>
+                                    )}
                                 </tbody>
                             </table>
                         </div>

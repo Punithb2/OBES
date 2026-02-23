@@ -3,6 +3,7 @@ import { Card, CardContent } from '../shared/Card';
 import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { useAuth } from '../../../contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
+import { BlockSkeleton } from '../shared/SkeletonLoaders';
 
 const ProgramLevelMatrixPage = () => {
     const { user } = useAuth();
@@ -134,7 +135,7 @@ const ProgramLevelMatrixPage = () => {
         return entries.sort(([semA], [semB]) => Number(semA) - Number(semB));
     }, [selectedSemester, coursesBySemester]);
 
-    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
+    if (loading) return <div className="p-6 space-y-6 pb-10"><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /></div>;
 
     return (
         <div className="space-y-6 p-6">

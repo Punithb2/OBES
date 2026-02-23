@@ -1,20 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
-import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
+import api, { fetchAllPages } from '../../../services/api'; 
 import { Icons } from '../shared/icons';
+import { Loader2 } from 'lucide-react'; 
 import ConfirmationModal from '../shared/ConfirmationModal';
+import toast from 'react-hot-toast'; // 1. IMPORT TOAST
+import { TableSkeleton } from '../shared/SkeletonLoaders';
 
-// --- Admin Modal ---
-const AdminModal = ({ isOpen, onClose, onSave, admin = null, departments = [] }) => {
-    const [formData, setFormData] = useState({ name: '', email: '', departmentId: '' });
+// --- ADMIN MODAL COMPONENT ---
+const AdminModal = ({ isOpen, onClose, onSave, adminUser = null, departments = [] }) => {
+    const [formData, setFormData] = useState({ name: '', email: '', password: '', department: '' });
 
     useEffect(() => {
-        if (admin) {
-            setFormData({ name: admin.name || admin.display_name || '', email: admin.email, departmentId: admin.department });
+        if (adminUser) {
+            setFormData({ 
+                name: adminUser.display_name || adminUser.username, 
+                email: adminUser.email, 
+                password: '',
+                department: adminUser.department || ''
+            });
         } else {
-            setFormData({ name: '', email: '', departmentId: departments[0]?.id || '' });
+            setFormData({ name: '', email: '', password: '', department: '' });
         }
-    }, [admin, isOpen, departments]);
+    }, [adminUser, isOpen]);
 
     if (!isOpen) return null;
 
@@ -24,35 +32,46 @@ const AdminModal = ({ isOpen, onClose, onSave, admin = null, departments = [] })
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm transition-opacity">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
-                    {admin ? 'Edit Admin' : 'Add New Admin'}
-                </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm transition-opacity animate-in fade-in">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4 transform transition-all scale-100">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                        {adminUser ? 'Edit Department Admin' : 'Add Department Admin'}
+                    </h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300">
+                        <Icons.XMark className="h-6 w-6" />
+                    </button>
+                </div>
+                
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
-                        <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                        <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Full Name <span className="text-red-500">*</span></label>
+                        <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm" placeholder="e.g. Jane Doe" />
                     </div>
+
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
-                        <input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+                        <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Email (Login) <span className="text-red-500">*</span></label>
+                        <input required type="email" disabled={!!adminUser} value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm disabled:opacity-50" placeholder="e.g. admin@college.edu" />
                     </div>
+
+                    {!adminUser && (
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Initial Password <span className="text-red-500">*</span></label>
+                            <input required type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm" placeholder="Set a strong password" />
+                        </div>
+                    )}
+
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Department</label>
-                        <select 
-                            required 
-                            value={formData.departmentId} 
-                            onChange={e => setFormData({...formData, departmentId: e.target.value})}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        >
-                            <option value="">Select Department</option>
-                            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Assign to Department <span className="text-red-500">*</span></label>
+                        <select required value={formData.department} onChange={e => setFormData({...formData, department: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm">
+                            <option value="">-- Select Department --</option>
+                            {departments.map(d => <option key={d.id} value={d.id}>{d.name} ({d.id})</option>)}
                         </select>
                     </div>
-                    <div className="flex justify-end space-x-3 mt-6">
-                        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200">Cancel</button>
-                        <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700">Save</button>
+                    
+                    <div className="flex justify-end space-x-3 mt-6 pt-2 border-t dark:border-gray-700">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-bold text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 transition-colors">Cancel</button>
+                        <button type="submit" className="px-4 py-2 text-sm font-bold text-white bg-primary-600 rounded-md hover:bg-primary-700 shadow-sm transition-colors">Save Admin</button>
                     </div>
                 </form>
             </div>
@@ -60,27 +79,29 @@ const AdminModal = ({ isOpen, onClose, onSave, admin = null, departments = [] })
     );
 };
 
+// --- MAIN COMPONENT ---
 const AdminManagement = () => {
     const [admins, setAdmins] = useState([]);
     const [departments, setDepartments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [modal, setModal] = useState({ isOpen: false, admin: null });
+    
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedAdmin, setSelectedAdmin] = useState(null);
     const [deleteModal, setDeleteModal] = useState({ isOpen: false, idToDelete: null });
 
     const fetchData = async () => {
         try {
             setLoading(true);
-            // RECURSIVE FETCH IMPLEMENTED HERE
             const [fetchedAdmins, fetchedDepts] = await Promise.all([
-                fetchAllPages('/users/?role=admin'), 
+                fetchAllPages('/users/?role=admin'),
                 fetchAllPages('/departments/')
             ]);
             
             setAdmins(Array.isArray(fetchedAdmins) ? fetchedAdmins : []);
             setDepartments(Array.isArray(fetchedDepts) ? fetchedDepts : []);
-
         } catch (error) {
-            console.error("Failed to load data", error);
+            console.error("Failed to fetch data", error);
+            toast.error("Failed to load admin list.");
         } finally {
             setLoading(false);
         }
@@ -88,28 +109,37 @@ const AdminManagement = () => {
 
     useEffect(() => { fetchData(); }, []);
 
-    const handleSave = async (data) => {
-        // Map form data to Django serializer fields
-        const payload = { 
-            username: data.email,
-            email: data.email,
-            display_name: data.name,
+    const openAddModal = () => { setSelectedAdmin(null); setIsModalOpen(true); };
+    const openEditModal = (adminUser) => { setSelectedAdmin(adminUser); setIsModalOpen(true); };
+    const closeModal = () => { setIsModalOpen(false); setSelectedAdmin(null); };
+
+    const handleSave = async (formData) => {
+        const payload = {
+            username: formData.email,
+            email: formData.email,
+            display_name: formData.name,
             role: 'admin',
-            department: data.departmentId
+            department: formData.department
         };
-        
-        try {
-            if (modal.admin) {
-                await api.patch(`/users/${modal.admin.id}/`, payload);
-            } else {
-                await api.post('/users/', { ...payload, password: 'password123' }); // Set default password
-            }
-            setModal({ isOpen: false, admin: null });
-            fetchData();
-        } catch (error) {
-            console.error("Failed to save admin", error);
-            alert("Failed to save admin. The email might already exist.");
+
+        if (!selectedAdmin && formData.password) {
+            payload.password = formData.password;
         }
+
+        const isEdit = !!selectedAdmin;
+        const savePromise = isEdit 
+            ? api.patch(`/users/${selectedAdmin.id}/`, payload)
+            : api.post('/users/', payload);
+
+        // 2. TOAST PROMISE FOR SAVING
+        toast.promise(savePromise, {
+            loading: 'Saving admin details...',
+            success: 'Department Admin saved successfully!',
+            error: 'Failed to save. Ensure email is unique.'
+        }).then(() => {
+            closeModal();
+            fetchData();
+        }).catch(err => console.error(err));
     };
 
     const openDeleteModal = (id) => {
@@ -117,26 +147,35 @@ const AdminManagement = () => {
     };
 
     const confirmDelete = async () => {
-        try { 
-            await api.delete(`/users/${deleteModal.idToDelete}/`); 
-            fetchData(); 
-        } 
-        catch (error) { console.error(error); }
-        finally {
+        // 3. TOAST PROMISE FOR DELETING
+        toast.promise(
+            api.delete(`/users/${deleteModal.idToDelete}/`),
+            {
+                loading: 'Removing admin...',
+                success: 'Admin removed successfully.',
+                error: 'Failed to delete admin.'
+            }
+        ).then(() => {
+            fetchData();
+        }).finally(() => {
             setDeleteModal({ isOpen: false, idToDelete: null });
-        }
+        });
     };
 
-    const getDeptName = (id) => departments.find(d => String(d.id) === String(id))?.name || 'Unknown';
+    const getDeptName = (deptId) => {
+        const d = departments.find(x => String(x.id) === String(deptId));
+        return d ? d.name : <span className="text-gray-400 italic">Unknown</span>;
+    };
 
     return (
-        <div className="p-6">
-            <AdminModal isOpen={modal.isOpen} onClose={() => setModal({ isOpen: false, admin: null })} onSave={handleSave} admin={modal.admin} departments={departments} />
-            
+        <div className="p-6 space-y-6">
+            <AdminModal isOpen={isModalOpen} onClose={closeModal} onSave={handleSave} adminUser={selectedAdmin} departments={departments} />
+
             {deleteModal.isOpen && (
                 <ConfirmationModal 
-                    title="Delete Admin"
-                    message="Are you sure you want to delete this admin? They will lose access to the system."
+                    title="Remove Admin"
+                    message="Are you sure you want to remove this administrator? They will lose access to the system."
+                    theme="danger"
                     onConfirm={confirmDelete}
                     onCancel={() => setDeleteModal({ isOpen: false, idToDelete: null })}
                 />
@@ -144,53 +183,49 @@ const AdminManagement = () => {
 
             <Card>
                 <CardHeader>
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                         <div>
-                            <CardTitle>Manage Admins (HODs)</CardTitle>
-                            <CardDescription>Assign departmental admins and manage their access.</CardDescription>
+                            <CardTitle>Manage Department Admins</CardTitle>
+                            <CardDescription>Assign administrative users to manage specific departments.</CardDescription>
                         </div>
-                        <button 
-                            onClick={() => setModal({ isOpen: true, admin: null })}
-                            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium flex items-center gap-2"
-                        >
+                        <button onClick={openAddModal} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-bold flex items-center gap-2 transition-colors shadow-sm">
                             <Icons.PlusCircle className="h-4 w-4" /> Add Admin
                         </button>
                     </div>
                 </CardHeader>
                 <CardContent>
-                    {loading ? <div className="text-center py-8 text-gray-500">Loading...</div> : (
-                        <div className="overflow-x-auto border dark:border-gray-700 rounded-lg">
-                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    {loading ? (
+                        <TableSkeleton rows={10} columns={4} />
+                    ) : (
+                        // 4. ADDED STICKY HEADER WRAPPER
+                        <div className="overflow-y-auto max-h-[70vh] border rounded-lg dark:border-gray-700 custom-scrollbar">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 relative">
                                 <thead className="bg-gray-50 dark:bg-gray-700/50">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Name</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Email</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Department</th>
-                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Name</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Email</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Assigned Department</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-right text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                     {admins.length === 0 ? (
-                                        <tr>
-                                            <td colSpan="4" className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
-                                                No admins found. Click "Add Admin" to create one.
-                                            </td>
-                                        </tr>
+                                        <tr><td colSpan="4" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">No admins found. Click "Add Admin" to create one.</td></tr>
                                     ) : (
                                         admins.map(admin => (
-                                            <tr key={admin.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                                                    {admin.display_name || admin.username}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                                    {admin.email}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                                    {getDeptName(admin.department)}
+                                            <tr key={admin.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">{admin.display_name || admin.username}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{admin.email}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700 dark:text-gray-300">
+                                                    <span className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-100 dark:border-blue-800/50">
+                                                        {getDeptName(admin.department)}
+                                                    </span>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                    <button onClick={() => setModal({ isOpen: true, admin })} className="text-primary-600 hover:text-primary-800 dark:text-primary-400 mr-4">Edit</button>
-                                                    <button onClick={() => openDeleteModal(admin.id)} className="text-red-600 hover:text-red-800 dark:text-red-400">Delete</button>
+                                                    <div className="flex justify-end gap-3">
+                                                        <button onClick={() => openEditModal(admin)} className="text-primary-600 hover:text-primary-900 dark:text-primary-400 transition-colors"><Icons.PencilSquare className="w-5 h-5" /></button>
+                                                        <button onClick={() => openDeleteModal(admin.id)} className="text-red-600 hover:text-red-900 dark:text-red-400 transition-colors"><Icons.Trash className="w-5 h-5" /></button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))

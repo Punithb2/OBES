@@ -1,25 +1,35 @@
-import { useRoutes } from "react-router-dom";
-import CssBaseline from "@mui/material/CssBaseline";
-// ROOT THEME PROVIDER
-import { ParcTheme } from "./components";
-// ALL CONTEXTS
-import SettingsProvider from "./contexts/SettingsContext";
-import { AuthProvider } from "./contexts/AuthContext";
-// ROUTES
-import routes from "./routes";
-// import "../__api__"; // Removed, API folder deleted
+import { useRoutes } from 'react-router-dom';
+import CssBaseline from '@mui/material/CssBaseline';
+import { AuthProvider } from './contexts/AuthContext';
+import SettingsProvider from './contexts/SettingsContext';
+import ParcTheme from './components/parcTheme/ParcTheme';
+import routes from './routes';
+import { Toaster } from 'react-hot-toast'; 
 
-export default function App() {
+function App() {
   const content = useRoutes(routes);
 
   return (
     <SettingsProvider>
       <AuthProvider>
-      <ParcTheme>
-        <CssBaseline />
-        {content}
-      </ParcTheme>
+        <ParcTheme>
+          <CssBaseline />
+          <Toaster 
+            position="top-right"
+            toastOptions={{
+              className: 'dark:bg-gray-800 dark:text-white',
+              duration: 3000,
+              style: {
+                fontWeight: '500',
+                fontSize: '14px'
+              }
+            }} 
+          />
+          {content}
+        </ParcTheme>
       </AuthProvider>
     </SettingsProvider>
   );
 }
+
+export default App;

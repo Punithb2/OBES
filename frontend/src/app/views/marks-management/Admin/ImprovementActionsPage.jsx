@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../sh
 import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
 import { Icons } from '../shared/icons';
+import { BlockSkeleton } from '../shared/SkeletonLoaders';
 
 // Mock suggestions database (In a real app, this could be an API endpoint)
 const SUGGESTIONS_DB = {
@@ -200,7 +201,7 @@ const ImprovementActionsPage = () => {
 
     }, [courses, outcomes, matrix, surveyData, schemes, courseReports]);
 
-    if (loading) return <div className="p-12 text-center text-gray-500">Analyzing attainment data...</div>;
+    if (loading) return <div className="p-6 space-y-6 pb-10"><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /></div>;
 
     return (
         <div className="p-6 space-y-6">

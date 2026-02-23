@@ -3,6 +3,7 @@ import { Card, CardContent } from '../shared/Card';
 import api, { fetchAllPages } from '../../../services/api'; 
 import { Loader2, Filter, Building2, Search, Download } from 'lucide-react'; 
 import * as XLSX from 'xlsx-js-style'; 
+import { TableSkeleton } from '../shared/SkeletonLoaders';
 
 const DepartmentAttainmentPage = () => {
     const [loading, setLoading] = useState(false);
@@ -385,7 +386,7 @@ const DepartmentAttainmentPage = () => {
             </div>
 
             {loading ? (
-                 <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>
+                 <TableSkeleton rows={15} columns={10} />
             ) : !selectedDeptId ? (
                 <div className="text-center py-20 bg-gray-50 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
                     <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />

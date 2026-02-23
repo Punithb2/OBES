@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../sh
 import { useAuth } from 'app/contexts/AuthContext';
 import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { Loader2, Save, AlertCircle, CheckCircle, X } from 'lucide-react';
+import { TableSkeleton } from '../shared/SkeletonLoaders';
 
 // --- CUSTOM MODAL ---
 const CustomModal = ({ isOpen, onClose, config }) => {
@@ -132,7 +133,7 @@ const IndirectCoAttainmentPage = () => {
         }
     };
 
-    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
+    if (loading) return <div className="p-6 space-y-6 pb-10"><TableSkeleton rows={8} columns={3} /></div>;
 
     return (
         <div className="space-y-6 pb-10">

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from '../../../contexts/AuthContext';
-import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
+import api, { fetchAllPages } from '../../../services/api'; 
 import { Icons } from '../shared/icons';
+import toast from 'react-hot-toast'; // 1. IMPORT TOAST
+import { TableSkeleton } from '../shared/SkeletonLoaders';
 
 // --- Assignment Modal Component ---
 const AssignmentModal = ({ isOpen, onClose, course, allFaculty, onSave }) => {
@@ -35,7 +37,8 @@ const AssignmentModal = ({ isOpen, onClose, course, allFaculty, onSave }) => {
         
         const isAlreadyAssigned = assignments.some(a => String(a.facultyId) === String(newFacultyId)); 
         if (isAlreadyAssigned) {
-            alert("This faculty member is already assigned to this course.");
+            // 2. REPLACED ALERT WITH TOAST
+            toast.error("This faculty member is already assigned to this course.");
             return;
         }
 
@@ -73,9 +76,9 @@ const AssignmentModal = ({ isOpen, onClose, course, allFaculty, onSave }) => {
 
                 <div className="space-y-6">
                     {/* List Existing Assignments */}
-                    <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg border dark:border-gray-700 overflow-hidden">
+                    <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg border dark:border-gray-700 overflow-hidden max-h-60 overflow-y-auto custom-scrollbar">
                         <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                            <thead className="bg-gray-100 dark:bg-gray-700">
+                            <thead className="bg-gray-100 dark:bg-gray-700 sticky top-0 z-10">
                                 <tr>
                                     <th className="px-4 py-2 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase">Faculty</th>
                                     <th className="px-4 py-2 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase">Role</th>
@@ -178,22 +181,21 @@ const CourseAssignment = () => {
             setLoading(true);
             const deptId = user.department;
 
-            // 1. Fetch Faculty (Filtered by Dept) WITH RECURSIVE HELPER
-            const fetchedFaculty = await fetchAllPages(`/users/?role=faculty&department=${deptId}`);
+            const [fetchedFaculty, fetchedCourses] = await Promise.all([
+                fetchAllPages(`/users/?role=faculty&department=${deptId}`),
+                fetchAllPages(`/courses/?department=${deptId}`)
+            ]);
+            
             setFaculty(Array.isArray(fetchedFaculty) ? fetchedFaculty : []);
 
-            // 2. Fetch Courses (Filtered by Dept) WITH RECURSIVE HELPER
-            const fetchedCourses = await fetchAllPages(`/courses/?department=${deptId}`);
-            
-            // FIX: Check if it's an array before sorting
             const sortedCourses = Array.isArray(fetchedCourses) 
                 ? [...fetchedCourses].sort((a, b) => a.semester - b.semester || (a.code || '').localeCompare(b.code || ''))
                 : [];
                 
             setCourses(sortedCourses);
-            
         } catch (error) {
             console.error("Failed to load data", error);
+            toast.error("Failed to load course assignments.");
         } finally {
             setLoading(false);
         }
@@ -202,33 +204,34 @@ const CourseAssignment = () => {
     useEffect(() => { fetchData(); }, [user]);
 
     const handleSaveAssignments = async (courseId, assignedTeam) => {
-        try {
-            const courseToUpdate = courses.find(c => String(c.id) === String(courseId));
-            
-            // Logic: Update the 'settings' JSON field
-            const updatedSettings = {
-                ...(courseToUpdate.settings || {}),
-                assigned_team: assignedTeam
-            };
+        const courseToUpdate = courses.find(c => String(c.id) === String(courseId));
+        
+        const updatedSettings = {
+            ...(courseToUpdate.settings || {}),
+            assigned_team: assignedTeam
+        };
 
-            // Also update the main 'assigned_faculty' field with the first Coordinator/Lecturer found
-            const primaryFaculty = assignedTeam.length > 0 ? assignedTeam[0].facultyId : null;
+        const primaryFaculty = assignedTeam.length > 0 ? assignedTeam[0].facultyId : null;
 
-            await api.patch(`/courses/${courseId}/`, { 
-                settings: updatedSettings,
-                assigned_faculty: primaryFaculty 
-            });
+        const savePromise = api.patch(`/courses/${courseId}/`, { 
+            settings: updatedSettings,
+            assigned_faculty: primaryFaculty 
+        });
 
-            // Update local state
+        // 3. REPLACED ALERT WITH TOAST.PROMISE
+        toast.promise(savePromise, {
+            loading: 'Saving team assignments...',
+            success: 'Assignments updated successfully!',
+            error: 'Failed to update assignments. Please try again.'
+        }).then(() => {
+            // Update local state smoothly
             setCourses(prev => prev.map(c => 
                 String(c.id) === String(courseId) ? { ...c, settings: updatedSettings, assigned_faculty: primaryFaculty } : c
             ));
-            
             setModal({ isOpen: false, courseId: null });
-        } catch (error) {
+        }).catch(error => {
             console.error("Failed to save assignments", error);
-            alert("Failed to update assignments.");
-        }
+        });
     };
 
     const getFacultyName = (id) => {
@@ -285,21 +288,23 @@ const CourseAssignment = () => {
                 </CardHeader>
                 <CardContent>
                     {loading ? (
-                        <div className="text-center py-12 text-gray-500">Loading assignments...</div>
+                        <TableSkeleton rows={10} columns={4} />
                     ) : (
-                        <div className="overflow-x-auto border rounded-lg dark:border-gray-700">
-                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                <thead className="bg-gray-50 dark:bg-gray-700/50">
+                        // 4. ADDED STICKY HEADER WRAPPER LOGIC (max-h-[70vh] overflow-y-auto)
+                        <div className="overflow-y-auto max-h-[70vh] border rounded-lg dark:border-gray-700 custom-scrollbar">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 relative">
+                                <thead className="bg-gray-50 dark:bg-gray-800">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider w-24">Code</th>
-                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider w-64">Course Name</th>
-                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider">Assigned Team</th>
-                                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider w-32">Action</th>
+                                        {/* 5. ADDED STICKY CLASSES TO TH Elements */}
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider w-24 shadow-sm">Code</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider w-64 shadow-sm">Course Name</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider shadow-sm">Assigned Team</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-right text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider w-32 shadow-sm">Action</th>
                                     </tr>
                                 </thead>
-                                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-700/50">
                                     {courses.map(course => (
-                                        <tr key={course.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                        <tr key={course.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700 dark:text-gray-300 align-top">
                                                 {course.code}
                                             </td>
@@ -313,10 +318,10 @@ const CourseAssignment = () => {
                                             <td className="px-6 py-4 text-right align-top">
                                                 <button 
                                                     onClick={() => setModal({ isOpen: true, courseId: course.id })}
-                                                    className="inline-flex items-center px-3 py-1.5 border border-primary-600 text-primary-600 rounded-md hover:bg-primary-50 text-xs font-medium transition-colors"
+                                                    className="inline-flex items-center px-3 py-1.5 border border-primary-600 text-primary-600 rounded-md hover:bg-primary-50 text-xs font-medium transition-colors dark:hover:bg-primary-900/30"
                                                 >
                                                     <Icons.PencilSquare className="w-3 h-3 mr-1.5" />
-                                                    Assign
+                                                    Assign Team
                                                 </button>
                                             </td>
                                         </tr>

@@ -36,9 +36,11 @@
     "lucide-react": "^0.554.0",
     "nanoid": "^5.0.7",
     "notistack": "^3.0.1",
+    "papaparse": "^5.5.3",
     "react": "^18.3.1",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^18.3.1",
+    "react-hot-toast": "^2.6.0",
     "react-perfect-scrollbar": "^1.5.8",
     "react-router-dom": "^6.27.0",
     "react-to-print": "^3.2.0",
@@ -58,7 +60,7 @@
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
     "customize-cra": "^1.0.0",
-    "eslint": "^9.13.0",
+    "eslint": "^10.0.1",
     "eslint-plugin-react": "^7.22.0",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.13",
@@ -67,6 +69,6 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.17",
     "vite": "^7.2.6",
-    "vite-plugin-pwa": "^0.11.3"
+    "vite-plugin-pwa": "^1.2.0"
   }
 }

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../sh
 import api, { fetchAllPages } from '../../../services/api'; 
 import { useAuth } from '../../../contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
+import { BlockSkeleton } from '../shared/SkeletonLoaders';
 
 const ConsolidatedMatrixPage = () => {
     const { user } = useAuth();
@@ -113,7 +114,7 @@ const ConsolidatedMatrixPage = () => {
         ? courses
         : courses.filter(course => course.semester.toString() === selectedSemester);
 
-    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
+    if (loading) return <div className="p-6 space-y-6 pb-10"><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /></div>
 
     return (
         <div className="p-6 space-y-6">

@@ -3,7 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../sh
 import { useAuth } from '../../../contexts/AuthContext';
 import api from '../../../services/api';
 import { Loader2 } from 'lucide-react';
-import ConfirmationModal from '../shared/ConfirmationModal'; // IMPORT MODAL
+import ConfirmationModal from '../shared/ConfirmationModal';
+import toast from 'react-hot-toast';
+import { BlockSkeleton } from '../shared/SkeletonLoaders';
 
 // Reusable Card Component for each Survey Type
 const SurveyCard = ({ title, description, outcomes, ratings, onRatingChange }) => {
@@ -56,13 +58,6 @@ const IndirectAttainmentPage = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [outcomes, setOutcomes] = useState([]); 
     const [surveyId, setSurveyId] = useState(null);
-
-    // --- UI MODAL STATE ---
-    const [uiModal, setUiModal] = useState({ isOpen: false, title: '', message: '', isAlert: true, theme: 'primary' });
-    
-    const showAlert = (title, message, theme = 'primary') => {
-        setUiModal({ isOpen: true, title, message, isAlert: true, theme });
-    };
 
     const [surveyRatings, setSurveyRatings] = useState({
         exitSurvey: {},
@@ -136,50 +131,40 @@ const IndirectAttainmentPage = () => {
     // 3. Save Changes
     const handleSaveChanges = async () => {
         if (!user || !user.department) return;
-        setIsSaving(true);
-
-        const payload = {
-            department: user.department,
-            exit_survey: surveyRatings.exitSurvey,
-            employer_survey: surveyRatings.employerSurvey,
-            alumni_survey: surveyRatings.alumniSurvey
-        };
-
-        try {
+        
+        // 3. USE TOAST.PROMISE FOR BEAUTIFUL LOADING -> SUCCESS/ERROR ANIMATION
+        const savePromise = async () => {
+            const payload = {
+                department: user.department,
+                exit_survey: surveyRatings.exitSurvey,
+                employer_survey: surveyRatings.employerSurvey,
+                alumni_survey: surveyRatings.alumniSurvey
+            };
             if (surveyId) {
                 await api.patch(`/surveys/${surveyId}/`, payload);
             } else {
                 const res = await api.post('/surveys/', payload);
                 setSurveyId(res.data.id); 
             }
-            showAlert('Success', 'Survey ratings saved successfully.', 'success');
-        } catch (error) {
-            console.error("Failed to save surveys", error);
-            showAlert('Error', 'Failed to save survey data. Check connection.', 'danger');
-        } finally {
+        };
+
+        setIsSaving(true);
+        
+        toast.promise(savePromise(), {
+            loading: 'Saving survey ratings...',
+            success: 'Survey ratings saved successfully!',
+            error: 'Failed to save. Please check your connection.',
+        }).finally(() => {
             setIsSaving(false);
-        }
+        });
     };
 
     if (loading) {
-        return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
+        return <div className="p-6 space-y-6 pb-10"><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /></div>
     }
 
     return (
         <div className="p-6 space-y-6 pb-10">
-            
-            {/* SHARED CONFIRMATION MODAL */}
-            {uiModal.isOpen && (
-                <ConfirmationModal 
-                    title={uiModal.title}
-                    message={uiModal.message}
-                    isAlert={uiModal.isAlert}
-                    theme={uiModal.theme}
-                    confirmText="OK"
-                    onConfirm={() => setUiModal(prev => ({ ...prev, isOpen: false }))}
-                />
-            )}
-
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Indirect Attainment Surveys</h1>
