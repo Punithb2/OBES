@@ -4,6 +4,7 @@ import { Icons } from '../shared/icons';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from 'app/contexts/AuthContext';
 import api from '../../../services/api';
+import { DashboardCardSkeleton, BlockSkeleton } from '../shared/SkeletonLoaders';
 
 const FacultyDashboard = () => {
     const { user } = useAuth();
@@ -154,7 +155,11 @@ const FacultyDashboard = () => {
     }, [user]);
 
     if (!user) return null;
-    if (loading) return <div className="p-12 flex justify-center items-center h-screen text-gray-500">Loading Dashboard...</div>;
+    if (loading) return <div className="p-6 space-y-6">
+                            <div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-8"></div>
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><DashboardCardSkeleton /><DashboardCardSkeleton /><DashboardCardSkeleton /><DashboardCardSkeleton /></div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6"><BlockSkeleton className="w-full h-64" /><BlockSkeleton className="h-64" /></div>
+                        </div>
 
     return (
         <div className="space-y-6">

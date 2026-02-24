@@ -4,7 +4,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import api, { fetchAllPages } from '../../../services/api'; 
 import { Icons } from '../shared/icons';
 import ConfirmationModal from '../shared/ConfirmationModal';
-import toast from 'react-hot-toast'; // 1. IMPORT TOAST
+import toast from 'react-hot-toast'; // IMPORT TOAST
 import { TableSkeleton } from '../shared/SkeletonLoaders';
 
 // --- FACULTY MODAL COMPONENT (Unchanged) ---
@@ -109,7 +109,7 @@ const FacultyManagement = () => {
             payload.password = formData.password;
         }
 
-        // 2. USE TOAST PROMISE FOR SAVING
+        // USE TOAST PROMISE FOR SAVING
         toast.promise(
             selectedFaculty ? api.patch(`/users/${selectedFaculty.id}/`, payload) : api.post('/users/', payload),
             {
@@ -166,30 +166,36 @@ const FacultyManagement = () => {
                         </button>
                     </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0">
                     {loading ? (
-                        <TableSkeleton rows={10} columns={3} />
+                        <div className="p-6">
+                            <TableSkeleton rows={10} columns={3} />
+                        </div>
                     ) : (
-                        <div className="overflow-x-auto border rounded-lg dark:border-gray-700">
-                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                <thead className="bg-gray-50 dark:bg-gray-700/50">
+                        // --- STICKY HEADER WRAPPER ---
+                        <div className="overflow-y-auto max-h-[70vh] border rounded-lg dark:border-gray-700 custom-scrollbar m-4">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 relative">
+                                <thead className="bg-gray-50 dark:bg-gray-800">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Name</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Email</th>
-                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                                        {/* --- STICKY CLASSES ADDED TO TH Elements --- */}
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Name</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Email</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-right text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-700/50">
                                     {faculty.length === 0 ? (
                                         <tr><td colSpan="3" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">No faculty members found. Click "Add Faculty" to create one.</td></tr>
                                     ) : (
                                         faculty.map(f => (
-                                            <tr key={f.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{f.display_name || f.username}</td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{f.email}</td>
+                                            <tr key={f.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">{f.display_name || f.username}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">{f.email}</td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                    <button onClick={() => openEditModal(f)} className="text-primary-600 hover:text-primary-900 dark:text-primary-400 mr-4 font-medium transition-colors"><Icons.PencilSquare className="w-5 h-5" /></button>
-                                                    <button onClick={() => openDeleteModal(f.id)} className="text-red-600 hover:text-red-900 dark:text-red-400 font-medium transition-colors"><Icons.Trash className="w-5 h-5" /></button>
+                                                    <div className="flex justify-end gap-3">
+                                                        <button onClick={() => openEditModal(f)} className="text-primary-600 hover:text-primary-900 dark:text-primary-400 transition-colors"><Icons.PencilSquare className="w-5 h-5" /></button>
+                                                        <button onClick={() => openDeleteModal(f.id)} className="text-red-600 hover:text-red-900 dark:text-red-400 transition-colors"><Icons.Trash className="w-5 h-5" /></button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))

@@ -4,7 +4,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import api, { fetchAllPages } from '../../../services/api'; 
 import { Loader2, Filter, Download } from 'lucide-react'; 
 import * as XLSX from 'xlsx-js-style'; 
-import { TableSkeleton } from '../shared/SkeletonLoaders';
+import { EvaluationResultSkeleton } from '../shared/SkeletonLoaders';
 
 const EvaluationResultPage = () => {
     const { user } = useAuth();
@@ -298,7 +298,7 @@ const EvaluationResultPage = () => {
         XLSX.writeFile(wb, `Evaluation_Result_Report.xlsx`);
     };
 
-    if (loading) return <div className="p-6 space-y-6 pb-10"><TableSkeleton rows={16} columns={10} /></div>;
+    if (loading) return <EvaluationResultSkeleton />;
 
     return (
         <div className="space-y-6 p-6">

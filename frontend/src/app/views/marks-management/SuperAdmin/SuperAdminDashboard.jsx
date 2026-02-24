@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../../services/api'; 
 import Icons from '../shared/icons';
 import { Card } from '../shared/Card';
+import { SuperAdminDashboardSkeleton } from '../shared/SkeletonLoaders';
 
 const SuperAdminDashboard = () => {
   const navigate = useNavigate();
@@ -84,11 +85,7 @@ const SuperAdminDashboard = () => {
   ];
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    );
+    return <SuperAdminDashboardSkeleton />;
   }
 
   return (

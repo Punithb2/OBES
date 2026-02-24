@@ -133,7 +133,7 @@ const CourseManagement = () => {
             department: user.department 
         };
 
-        // 2. USE TOAST PROMISE FOR SAVING
+        // USE TOAST PROMISE FOR SAVING
         toast.promise(
             selectedCourse ? api.patch(`/courses/${selectedCourse.id}/`, payload) : api.post('/courses/', payload),
             {
@@ -190,28 +190,32 @@ const CourseManagement = () => {
                         </button>
                     </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-0">
                     {loading ? (
-                        <TableSkeleton rows={10} columns={6} />
+                        <div className="p-6">
+                            <TableSkeleton rows={10} columns={6} />
+                        </div>
                     ) : (
-                        <div className="overflow-x-auto border rounded-lg dark:border-gray-700">
-                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                <thead className="bg-gray-50 dark:bg-gray-700/50">
+                        // --- STICKY HEADER WRAPPER ---
+                        <div className="overflow-y-auto max-h-[70vh] border rounded-lg dark:border-gray-700 custom-scrollbar m-4">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 relative">
+                                <thead className="bg-gray-50 dark:bg-gray-800">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Code</th>
-                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Course Name</th>
-                                        <th className="px-6 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Scheme</th>
-                                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Sem</th>
-                                        <th className="px-6 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Credits</th>
-                                        <th className="px-6 py-3 text-right text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                                        {/* --- STICKY CLASSES ADDED TO TH Elements --- */}
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Code</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Course Name</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Scheme</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Sem</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-center text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Credits</th>
+                                        <th className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-6 py-4 text-right text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider shadow-sm">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-700/50">
                                     {courses.length === 0 ? (
                                         <tr><td colSpan="6" className="px-6 py-12 text-center text-sm text-gray-500 dark:text-gray-400">No courses found. Click "Add Course" to create one.</td></tr>
                                     ) : (
                                         courses.map(c => (
-                                            <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                            <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-primary-600 dark:text-primary-400 font-bold">{c.code}</td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 dark:text-white">{c.name}</td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700 dark:text-gray-300">{getSchemeName(c.scheme)}</td>

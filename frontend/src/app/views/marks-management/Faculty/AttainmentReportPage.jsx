@@ -8,7 +8,8 @@ import {
 } from 'chart.js';
 import { Bar, Pie } from 'react-chartjs-2';
 import html2canvas from 'html2canvas'; 
-import jsPDF from 'jspdf';             
+import jsPDF from 'jspdf';   
+import { TableSkeleton, BlockSkeleton, DashboardCardSkeleton } from '../shared/SkeletonLoaders';          
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
@@ -238,8 +239,10 @@ const AttainmentReportPage = () => {
       </div>
 
       {loading ? (
-          <div className="flex h-64 items-center justify-center">
-              <Loader2 className="animate-spin h-8 w-8 text-primary-600" />
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6"><DashboardCardSkeleton /><DashboardCardSkeleton /><DashboardCardSkeleton /><DashboardCardSkeleton /></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6"><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /></div>
+            <div className="p-4 space-y-6 pb-10"><BlockSkeleton className="h-64" /></div>
           </div>
       ) : selectedCourse && reportData && chartConfig ? (
         

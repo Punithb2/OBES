@@ -4,6 +4,7 @@ import { useAuth } from 'app/contexts/AuthContext';
 import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { Loader2, User, BookOpen, Download } from 'lucide-react'; 
 import { useLocation } from 'react-router-dom'; 
+import { StudentReportSkeleton } from '../shared/SkeletonLoaders';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -233,7 +234,7 @@ const StudentIndividualReportPage = () => {
         }
     };
 
-    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
+    if (loading) return <StudentReportSkeleton />;
 
     return (
         <div className="space-y-6">

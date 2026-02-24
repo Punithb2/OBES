@@ -4,6 +4,7 @@ import { useAuth } from 'app/contexts/AuthContext';
 import api, { fetchAllPages } from '../../../services/api'; 
 import { Loader2, AlertCircle, Download } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style'; 
+import { CoPoAttainmentSkeleton } from '../shared/SkeletonLoaders';
 
 const CoPoAttainmentPage = () => {
     const { user } = useAuth();
@@ -624,7 +625,9 @@ const CoPoAttainmentPage = () => {
         XLSX.writeFile(workbook, `${selectedCourse.code}_Full_Attainment_Report.xlsx`);
     };
 
-    if (loading && !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
+    if (loading) {
+        return <CoPoAttainmentSkeleton />;
+    }
     if (!user) return null;
 
     // --- RENDER HELPERS ---

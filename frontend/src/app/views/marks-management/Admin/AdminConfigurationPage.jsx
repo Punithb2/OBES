@@ -247,7 +247,7 @@ const AdminConfigurationPage = () => {
     const handleToolChange = (id, field, value) => setIndirectTools(tools => tools.map(t => t.id === id ? { ...t, [field]: value } : t));
 
     if (loading && schemes.length === 0) {
-        return <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6"><BlockSkeleton className="h-48" /><BlockSkeleton className="h-48" /><BlockSkeleton className="h-48" /><BlockSkeleton className="h-48" /></div>
+        return <div className="p-6"><div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-8"></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6"><BlockSkeleton className="h-48" /><BlockSkeleton className="h-48" /><BlockSkeleton className="h-48" /><BlockSkeleton className="h-48" /></div></div>
     }
 
     return (

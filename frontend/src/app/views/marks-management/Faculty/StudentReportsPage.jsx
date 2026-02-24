@@ -4,6 +4,7 @@ import { useAuth } from 'app/contexts/AuthContext';
 import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
 import { Download, Loader2, Search, Filter, Eye } from 'lucide-react'; 
 import { useNavigate } from 'react-router-dom'; 
+import { TableSkeleton } from '../shared/SkeletonLoaders';
 
 const StudentReportsPage = () => {
     const { user } = useAuth();
@@ -182,7 +183,7 @@ const StudentReportsPage = () => {
         });
     };
 
-    if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary-600" /></div>;
+    if (loading) return <div className="p-6 space-y-6 pb-10"><div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-8"></div><TableSkeleton rows={15} columns={9} /></div>;
 
     return (
         <div className="space-y-6">

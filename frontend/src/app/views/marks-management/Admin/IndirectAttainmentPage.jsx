@@ -160,7 +160,7 @@ const IndirectAttainmentPage = () => {
     };
 
     if (loading) {
-        return <div className="p-6 space-y-6 pb-10"><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /></div>
+        return <div className="p-6 space-y-6 pb-10"><div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-8"></div><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /><BlockSkeleton className="h-64" /></div>
     }
 
     return (
