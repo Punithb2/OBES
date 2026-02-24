@@ -29,34 +29,45 @@ class UserViewSet(viewsets.ModelViewSet):
         new_role = request.data.get('role')
 
         if not creator.is_authenticated:
-             # Allow initial setup or handle via specific signup endpoint if needed
-             # For now, we fall back to standard permission classes
              pass
-
         elif creator.role == User.Role.SUPER_ADMIN:
             if new_role == User.Role.SUPER_ADMIN:
                 return Response({"error": "Cannot create another Super Admin"}, status=403)
-        
         elif creator.role == User.Role.ADMIN:
             if new_role != User.Role.FACULTY:
                 return Response({"error": "Admins can only create Faculty"}, status=403)
-        
         elif creator.role == User.Role.FACULTY:
             return Response({"error": "Faculty cannot create users"}, status=403)
 
         return super().create(request, *args, **kwargs)
     
     def get_queryset(self):
+        user = self.request.user
         queryset = User.objects.all()
-        role = self.request.query_params.get('role')
-        department = self.request.query_params.get('department')
-        
-        if role:
-            queryset = queryset.filter(role=role)
-        if department:
-            queryset = queryset.filter(department=department)
+
+        # 1. SECURITY FILTRATION 
+        if not user.is_authenticated:
+            return User.objects.none()
             
-        return queryset
+        elif user.role == User.Role.ADMIN or user.role == 'admin':
+            # Department Admins MUST ONLY see users in their own department
+            if user.department:
+                queryset = queryset.filter(department=user.department)
+            else:
+                return User.objects.none()
+                
+        # (SuperAdmins bypass this and see everyone)
+
+        # 2. URL PARAMETER FILTRATION
+        role_param = self.request.query_params.get('role')
+        if role_param:
+            queryset = queryset.filter(role=role_param)
+            
+        department_param = self.request.query_params.get('department')
+        if department_param:
+            queryset = queryset.filter(department=department_param)
+            
+        return queryset.distinct()
 
     @action(detail=False, methods=['get'])
     def me(self, request):
@@ -79,12 +90,38 @@ class CourseViewSet(viewsets.ModelViewSet):
     serializer_class = CourseSerializer
 
     def get_queryset(self):
+        user = self.request.user
         queryset = Course.objects.all()
-        # Filter by assigned faculty if parameter is provided
+
+        # 1. SECURITY FILTRATION (The Fix for the Data Bleed)
+        if not user.is_authenticated:
+            return Course.objects.none()
+            
+        elif user.role == User.Role.ADMIN or user.role == 'admin':
+            # Department Admins MUST ONLY see courses in their own department
+            if user.department:
+                queryset = queryset.filter(department=user.department)
+            else:
+                return Course.objects.none()
+                
+        elif user.role == User.Role.FACULTY or user.role == 'faculty':
+            # Faculty MUST ONLY see courses explicitly assigned to them
+            queryset = queryset.filter(assigned_faculty=user)
+
+        # (Note: SuperAdmins bypass the above if/elif and get all courses)
+
+
+        # 2. URL PARAMETER FILTRATION (For specific frontend requests)
+        department_param = self.request.query_params.get('department')
+        if department_param:
+            queryset = queryset.filter(department=department_param)
+
         assigned_faculty_id = self.request.query_params.get('assignedFacultyId')
         if assigned_faculty_id:
             queryset = queryset.filter(assigned_faculty__id=assigned_faculty_id)
-        return queryset
+
+        # Use .distinct() in case of multiple overlapping joins
+        return queryset.distinct()
 
 class StudentViewSet(viewsets.ModelViewSet):
     queryset = Student.objects.all()
