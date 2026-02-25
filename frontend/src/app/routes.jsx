@@ -22,6 +22,7 @@ const AdminDashboard = lazy(() => import("./views/marks-management/Admin/AdminDa
 const FacultyManagement = lazy(() => import("./views/marks-management/Admin/FacultyManagement")); 
 const CourseManagement = lazy(() => import("./views/marks-management/Admin/CourseManagement"));
 const CourseAssignment = lazy(() => import("./views/marks-management/Admin/CourseAssignment"));
+const StudentManagement = lazy(() => import("./views/marks-management/Admin/StudentManagement"));
 const OutcomesManagement = lazy(() => import("./views/marks-management/Admin/OutcomesManagement"));
 const ConsolidatedMatrixPage = lazy(() => import("./views/marks-management/Admin/ConsolidatedMatrixPage"));
 const ProgramLevelMatrixPage = lazy(() => import("./views/marks-management/Admin/ProgramLevelMatrixPage"));
@@ -62,6 +63,7 @@ const routes = [
       { path: "/admin/faculty", element: <FacultyManagement /> },
       { path: "/admin/manage-courses", element: <CourseManagement /> },
       { path: "/admin/assign-courses", element: <CourseAssignment /> },
+      { path: "/admin/student-management", element: <StudentManagement /> },
       { path: "/admin/outcomes", element: <OutcomesManagement /> },
       { path: "/admin/consolidation", element: <ConsolidatedMatrixPage /> },
       { path: "/admin/program-matrix", element: <ProgramLevelMatrixPage /> },

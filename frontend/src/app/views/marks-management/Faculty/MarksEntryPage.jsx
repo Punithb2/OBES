@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
 import api, { fetchAllPages } from '../../../services/api'; 
-import { Save, Pencil, Lock, Unlock, Check, Download, FileSpreadsheet, TrendingUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Save, Lock, Unlock, Download, FileSpreadsheet, TrendingUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // --- COMPARISON MODAL ---
@@ -20,12 +20,12 @@ const ComparisonModal = ({ isOpen, onClose, data }) => {
     const isImpBetter = impTotal > origTotal;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100">
                 <div className="p-5 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white">Improvement Comparison</h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{student.name} ({student.usn})</p>
-                    <span className="text-xs font-medium text-primary-600 bg-primary-50 px-2 py-0.5 rounded mt-2 inline-block">
+                    <span className="text-xs font-medium text-primary-600 bg-primary-50 dark:bg-primary-900/30 px-2 py-0.5 rounded mt-2 inline-block">
                         Improving: {targetAssessmentName}
                     </span>
                 </div>
@@ -131,13 +131,18 @@ const MarksEntryPage = () => {
       handleSelectionChange();
   }, [selectedCourseId, assessmentOptions]);
 
+  // --- DYNAMIC CONFIGURATION BUILDER ---
   const currentToolConfig = useMemo(() => {
       const tool = assessmentOptions.find(t => t.name === selectedAssessmentName);
       if (!tool) return null;
 
       const isSEE = tool.type === 'Semester End Exam' || tool.name === 'SEE' || tool.name === 'Semester End Exam';
-      const isActivity = tool.type === 'Activity' || tool.name.startsWith('Activity');
+      // Included Laboratory in the activity check so it acts as a single score out of maxMarks
+      const isActivity = tool.type === 'Activity' || tool.name.startsWith('Activity') || tool.type === 'Laboratory';
       const isImprovement = tool.type === 'Improvement Test';
+      
+      // NEW: Check if it's a Lab Course and an Internal Assessment
+      const isLabIA = selectedCourse?.settings?.courseType === 'Lab' && tool.type === 'Internal Assessment';
 
       let config = {
           total: tool.maxMarks || 0,
@@ -149,24 +154,41 @@ const MarksEntryPage = () => {
       if (isSEE) {
           config.isExternal = true;
           config.questions = [{ q: 'External', co: '', max: tool.maxMarks || 100 }];
+      } else if (isLabIA) {
+          // SWAP COs FOR LAB SPLIT
+          config.questions = [
+              { q: 'Test Marks', co: 'Test', max: tool.testMarks || 0 },
+              { q: 'Continuous Eval', co: 'CE', max: tool.continuousEval || 0 }
+          ];
       } else if (isActivity) {
           config.questions = [{ q: 'Score', co: '-', max: tool.maxMarks || 0 }];
       } else if (!isImprovement) {
+          // STANDARD THEORY CO DISTRIBUTION
           config.questions = Object.entries(tool.coDistribution || {}).map(([coId, marks]) => ({
               q: coId, co: coId, max: parseInt(marks) || 0
           }));
       }
 
       return config;
-  }, [assessmentOptions, selectedAssessmentName]);
+  }, [assessmentOptions, selectedAssessmentName, selectedCourse]);
 
   const getInternalConfig = (assessmentName) => {
       const tool = assessmentOptions.find(t => t.name === assessmentName);
       if (!tool) return { questions: [], total: 0 };
       
-      const questions = Object.entries(tool.coDistribution || {}).map(([coId, marks]) => ({
-          q: coId, co: coId, max: parseInt(marks) || 0
-      }));
+      const isLabIA = selectedCourse?.settings?.courseType === 'Lab' && tool.type === 'Internal Assessment';
+      
+      let questions = [];
+      if (isLabIA) {
+          questions = [
+              { q: 'Test Marks', co: 'Test', max: tool.testMarks || 0 },
+              { q: 'Continuous Eval', co: 'CE', max: tool.continuousEval || 0 }
+          ];
+      } else {
+          questions = Object.entries(tool.coDistribution || {}).map(([coId, marks]) => ({
+              q: coId, co: coId, max: parseInt(marks) || 0
+          }));
+      }
       return { questions, total: tool.maxMarks || 0 };
   };
 
@@ -188,9 +210,8 @@ const MarksEntryPage = () => {
     if (!silent) setLoading(true);
     
     try {
-        const allStudents = await fetchAllPages(`/students/`);
-        const students = allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId));
-        setCurrentStudents(students);
+        const allStudents = await fetchAllPages(`/students/?course=${selectedCourseId}`);
+        setCurrentStudents(allStudents);
 
         const allMarks = await fetchAllPages(`/marks/?course=${selectedCourseId}`);
         const existingMarks = allMarks.filter(m => m.assessment_name === selectedAssessmentName);
@@ -219,8 +240,7 @@ const MarksEntryPage = () => {
             if (record.improvement_test_for) initialMap[record.student] = record.improvement_test_for;
         });
 
-        students.forEach(student => {
-             // If a student doesn't have marks in the DB yet, open their row for editing by default
+        allStudents.forEach(student => {
              if (!initialMarks[student.id] || Object.keys(initialMarks[student.id]).length === 0) {
                  initialMarks[student.id] = {};
                  initialEditable[student.id] = true;
@@ -249,7 +269,7 @@ const MarksEntryPage = () => {
       if (!hasUnsavedChanges) return;
 
       const delayDebounceFn = setTimeout(() => {
-          handleSaveChanges(true); // Trigger a silent save
+          handleSaveChanges(true); 
       }, 2000); 
 
       return () => clearTimeout(delayDebounceFn);
@@ -285,10 +305,9 @@ const MarksEntryPage = () => {
   const handleImprovementTargetChange = (studentId, targetName) => {
       setImprovementMap(prev => ({ ...prev, [studentId]: targetName }));
       setMarks(prev => ({ ...prev, [studentId]: {} }));
-      setHasUnsavedChanges(true); // Trigger Auto-save
+      setHasUnsavedChanges(true); 
   };
 
-  // --- RESTORED: OPEN COMPARISON MODAL ---
   const openComparisonModal = (student) => {
       const impRecord = improvementMarksList.find(r => r.student === student.id);
       if (impRecord) {
@@ -302,7 +321,7 @@ const MarksEntryPage = () => {
       }
   };
 
-  // --- FEATURE 3: REAL TIME VALIDATION ---
+  // --- FEATURE 3: STRICT MAX-MARKS ENFORCEMENT ---
   const handleMarksChange = (studentId, questionIdentifier, value, dynamicConfig = null) => {
     const newMarks = JSON.parse(JSON.stringify(marks));
     
@@ -310,14 +329,20 @@ const MarksEntryPage = () => {
         if (newMarks[studentId]) delete newMarks[studentId][questionIdentifier];
     } else {
         let numValue = parseInt(value, 10);
-        if (!isNaN(numValue) && numValue >= 0) {
+        
+        const configToUse = dynamicConfig || currentToolConfig;
+        const targetQ = configToUse.questions.find(q => q.q === questionIdentifier);
+        const maxAllowed = targetQ ? targetQ.max : 100;
+
+        if (!isNaN(numValue)) {
+            numValue = Math.max(0, Math.min(numValue, maxAllowed));
             if (!newMarks[studentId]) newMarks[studentId] = {};
             newMarks[studentId][questionIdentifier] = numValue;
         }
     }
     
     setMarks(newMarks);
-    setHasUnsavedChanges(true); // Trigger Auto-save
+    setHasUnsavedChanges(true); 
   };
 
   const calculateTotal = (studentId, dynamicConfig = null) => {
@@ -337,7 +362,6 @@ const MarksEntryPage = () => {
     setEditableRows(prev => ({ ...prev, [studentId]: !prev[studentId] }));
   };
 
-  // Upgraded Save Function
   const handleSaveChanges = async (silent = false) => {
     if (!silent) setLoading(true);
     else setSaveStatus('saving');
@@ -388,7 +412,6 @@ const MarksEntryPage = () => {
         setSaveStatus('saved');
         setHasUnsavedChanges(false);
 
-        // Lock rows on manual save
         if (!silent) {
             toast.success("Marks saved successfully!");
             setEditableRows({}); 
@@ -404,31 +427,50 @@ const MarksEntryPage = () => {
     }
   };
 
-  // --- RESTORED: DOWNLOAD TEMPLATE ---
-  const handleDownloadTemplate = () => { 
-      if (!currentStudents.length) return;
+  const handleDownloadTemplate = () => {
       if (currentToolConfig.isImprovement) {
           toast.error("For Improvement Tests, please enter marks manually.");
           return;
       }
 
-      const headers = ['USN', 'Name'];
-      currentToolConfig.questions.forEach(q => headers.push(`${q.q} (${q.max})`));
-      const rows = currentStudents.map(student => {
-         const row = [student.usn, student.name];
-         currentToolConfig.questions.forEach(q => {
-             row.push(marks[student.id]?.[q.q] || '');
-         });
-         return row.join(',');
-      });
-      const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `${selectedCourse?.code || 'Course'}_${selectedAssessmentName}_Template.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      try {
+          const headers = ['USN', 'Name'];
+          if (currentToolConfig && currentToolConfig.questions) {
+              currentToolConfig.questions.forEach(q => headers.push(`${q.q} (${q.max})`));
+          }
+          
+          const rows = (currentStudents || []).map(student => {
+             const safeName = student.name.includes(',') ? `"${student.name}"` : student.name;
+             const row = [student.usn, safeName];
+             
+             if (currentToolConfig && currentToolConfig.questions) {
+                 currentToolConfig.questions.forEach(q => {
+                     row.push(marks[student.id]?.[q.q] || '');
+                 });
+             }
+             return row.join(',');
+          });
+          
+          const csvContent = [headers.join(','), ...rows].join('\n');
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.setAttribute("href", url);
+          
+          const safeAssessmentName = selectedAssessmentName ? selectedAssessmentName.replace(/\s+/g, '_') : 'Assessment';
+          const safeCourseCode = selectedCourse?.code || 'Course';
+          link.setAttribute("download", `${safeCourseCode}_${safeAssessmentName}_Template.csv`);
+          
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          
+          toast.success("CSV Template downloaded!");
+      } catch (error) {
+          console.error("CSV Generation Error:", error);
+          toast.error("Failed to generate CSV template.");
+      }
   };
   
   const handleBulkUpload = (event) => {
@@ -437,38 +479,56 @@ const MarksEntryPage = () => {
     const reader = new FileReader();
     reader.onload = (e) => {
         const text = e.target.result;
-        const rows = text.split('\n').map(row => row.split(','));
+        const rows = text.split(/\r?\n/).map(row => row.split(','));
         rows.shift();
+        
         const newMarks = { ...marks };
-        let updatedCount = 0;
+        const newStudentsList = [...currentStudents];
+        let marksUpdatedCount = 0;
+        let studentsAddedCount = 0;
+
         rows.forEach(row => {
-            if (row.length < 3) return;
+            if (row.length < 2 || !row[0].trim()) return; 
+            
             const usn = row[0].trim();
-            const student = currentStudents.find(s => s.usn === usn);
-            if (student) {
-                if (currentToolConfig.isImprovement && !improvementMap[student.id]) return; 
-                if (!newMarks[student.id]) newMarks[student.id] = {};
-                
-                if (!currentToolConfig.isImprovement) {
-                    currentToolConfig.questions.forEach((q, idx) => {
-                        const val = parseInt(row[idx + 2]); 
-                        if (!isNaN(val) && val <= q.max) {
+            let name = row[1].trim();
+            if (name.startsWith('"') && name.endsWith('"')) {
+                name = name.slice(1, -1);
+            }
+
+            let student = newStudentsList.find(s => s.usn === usn);
+            if (!student) {
+                student = { id: usn, usn: usn, name: name }; 
+                newStudentsList.push(student);
+                newMarks[student.id] = {}; 
+                studentsAddedCount++;
+            }
+
+            if (currentToolConfig && !currentToolConfig.isImprovement) {
+                currentToolConfig.questions.forEach((q, idx) => {
+                    const cellValue = row[idx + 2]; 
+                    if (cellValue !== undefined && cellValue.trim() !== '') {
+                        let val = parseInt(cellValue.trim());
+                        if (!isNaN(val)) {
+                            val = Math.max(0, Math.min(val, q.max));
+                            if (!newMarks[student.id]) newMarks[student.id] = {};
                             newMarks[student.id][q.q] = val;
-                            updatedCount++;
+                            marksUpdatedCount++;
                         }
-                    });
-                }
+                    }
+                });
             }
         });
+
+        setCurrentStudents(newStudentsList);
         setMarks(newMarks);
-        setHasUnsavedChanges(true); // Trigger auto-save on bulk upload
-        toast.success(`Successfully updated marks for ${updatedCount} entries.`);
+        setHasUnsavedChanges(true); 
+        toast.success(`Loaded ${studentsAddedCount} new students and updated ${marksUpdatedCount} marks.`);
         if (fileInputRef.current) fileInputRef.current.value = "";
     };
     reader.readAsText(file);
   };
 
-  // Status UI Element
   const renderSaveStatus = () => {
     if (!isTableVisible) return null;
     if (saveStatus === 'saving') return <span className="flex items-center text-yellow-600 dark:text-yellow-500 text-sm font-bold bg-yellow-50 dark:bg-yellow-900/30 px-3 py-1.5 rounded-md"><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Auto-saving...</span>;
@@ -477,7 +537,7 @@ const MarksEntryPage = () => {
   };
 
   return (
-    <div className="space-y-6 relative">
+    <div className="space-y-6 relative pb-10">
       <ComparisonModal isOpen={!!comparisonData} onClose={() => setComparisonData(null)} data={comparisonData} />
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -486,7 +546,6 @@ const MarksEntryPage = () => {
             <p className="text-gray-500 dark:text-gray-400 mt-1">Enter marks manually or use keyboard arrows to navigate.</p>
         </div>
         
-        {/* ASSURANCE BUTTON & INDICATOR */}
         <div className="flex items-center gap-3">
             {renderSaveStatus()}
             
@@ -518,7 +577,7 @@ const MarksEntryPage = () => {
                  <select 
                     value={selectedCourseId}
                     onChange={(e) => setSelectedCourseId(e.target.value)}
-                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 font-bold dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     disabled={courses.length === 0}
                 >
                     {courses.length > 0 ? courses.map(course => (
@@ -534,7 +593,7 @@ const MarksEntryPage = () => {
                         setSelectedAssessmentName(e.target.value);
                         handleSelectionChange();
                     }}
-                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 font-bold dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     disabled={assessmentOptions.length === 0}
                 >
                      {assessmentOptions.length > 0 ? (
@@ -548,7 +607,7 @@ const MarksEntryPage = () => {
                <div className="sm:col-span-1 flex flex-col gap-3">
                  <button 
                     onClick={() => handleLoadStudents(false)}
-                    className="w-full justify-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                    className="w-full justify-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
                     disabled={!selectedCourseId || !selectedAssessmentName || loading}
                 >
                     {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -558,10 +617,10 @@ const MarksEntryPage = () => {
                  {isTableVisible && (
                      <div className="flex gap-2">
                         <input type="file" accept=".csv" ref={fileInputRef} onChange={handleBulkUpload} className="hidden" />
-                        <button onClick={handleDownloadTemplate} className="flex-1 flex items-center justify-center px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-xs font-medium shadow-sm transition-colors dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700" title="Download CSV Template">
+                        <button onClick={handleDownloadTemplate} className="flex-1 flex items-center justify-center px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-xs font-bold shadow-sm transition-colors dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700" title="Download CSV Template">
                             <Download className="w-3 h-3 mr-2" /> Template
                         </button>
-                        <button onClick={() => fileInputRef.current.click()} className="flex-1 flex items-center justify-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-xs font-medium shadow-sm transition-colors" title="Upload Filled CSV">
+                        <button onClick={() => fileInputRef.current.click()} className="flex-1 flex items-center justify-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-xs font-bold shadow-sm transition-colors" title="Upload Filled CSV">
                             <FileSpreadsheet className="w-3 h-3 mr-2" /> Upload
                         </button>
                      </div>
@@ -582,7 +641,7 @@ const MarksEntryPage = () => {
                 </div>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-y-auto max-h-[65vh] custom-scrollbar border rounded-lg dark:border-gray-700">
+              <div className="overflow-y-auto max-h-[65vh] custom-scrollbar border rounded-lg dark:border-gray-700 m-4">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 relative">
                   <thead className="bg-gray-50 dark:bg-gray-800">
                     <tr>
@@ -597,13 +656,13 @@ const MarksEntryPage = () => {
                       ) : (
                           currentToolConfig.questions.map(q => (
                              <th key={q.q} scope="col" className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-3 py-3 text-center text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider shadow-sm">
-                               {q.q} <span className="font-normal normal-case">[{q.max}M]</span>
+                               {q.q} <span className="font-normal normal-case text-[10px] bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded ml-1">[{q.max}M]</span>
                              </th>
                           ))
                       )}
 
                       <th scope="col" className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-center text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider border-l dark:border-gray-600 shadow-sm">
-                        Total {currentToolConfig.isImprovement ? '' : <span className="font-normal normal-case">[{currentToolConfig.total}]</span>}
+                        Total {currentToolConfig.isImprovement ? '' : <span className="font-normal normal-case text-[10px] bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded ml-1">[{currentToolConfig.total}]</span>}
                       </th>
                       <th scope="col" className="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-center text-xs font-bold text-gray-500 dark:text-gray-300 uppercase tracking-wider border-l dark:border-gray-600 shadow-sm">
                         Actions
@@ -623,14 +682,14 @@ const MarksEntryPage = () => {
 
                           return (
                             <tr key={student.id} className={isEditing ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}>
-                                <td className="sticky left-0 bg-white dark:bg-gray-900 px-4 py-4 text-sm font-mono text-gray-700 dark:text-gray-300 border-r dark:border-gray-600 z-10">{student.usn}</td>
-                                <td className="sticky left-32 bg-white dark:bg-gray-900 px-4 py-4 text-sm font-medium text-gray-900 dark:text-white border-r dark:border-gray-600 z-10">{student.name}</td>
+                                <td className="sticky left-0 bg-inherit px-4 py-4 text-sm font-mono font-bold text-gray-700 dark:text-gray-300 border-r dark:border-gray-600 z-10">{student.usn}</td>
+                                <td className="sticky left-32 bg-inherit px-4 py-4 text-sm font-bold text-gray-900 dark:text-white border-r dark:border-gray-600 z-10">{student.name}</td>
                                 <td className="px-3 py-2 whitespace-nowrap text-center text-sm border-r dark:border-gray-600">
                                     <select
                                         disabled={!isEditing}
                                         value={targetAssessment || ''}
                                         onChange={(e) => handleImprovementTargetChange(student.id, e.target.value)}
-                                        className="w-full text-xs p-1.5 border rounded-md disabled:bg-gray-100 disabled:text-gray-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-primary-500 focus:border-primary-500"
+                                        className="w-full text-xs p-1.5 border rounded-md disabled:bg-transparent disabled:text-gray-500 dark:bg-gray-800 dark:border-gray-600 dark:text-white font-bold"
                                     >
                                         <option value="">Not Writing</option>
                                         {internalAssessmentOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
@@ -638,36 +697,25 @@ const MarksEntryPage = () => {
                                 </td>
                                 <td className="px-3 py-2 whitespace-nowrap text-center text-sm">
                                     {isNotWriting ? (
-                                        <span className="text-gray-400 italic text-xs">-- Not Writing --</span>
+                                        <span className="text-gray-400 italic text-xs font-bold">-- Not Writing --</span>
                                     ) : dynamicConfig ? (
                                         <div className="flex gap-2 justify-center">
                                             {dynamicConfig.questions.map((q, colIndex) => {
                                                 const currentValue = marks[student.id]?.[q.q] ?? '';
-                                                const isInvalid = currentValue !== '' && currentValue > q.max;
                                                 
                                                 return (
-                                                <div key={q.q} className="flex flex-col items-center relative group">
-                                                    <span className="text-[9px] text-gray-500 uppercase font-medium">{q.co}</span>
+                                                <div key={q.q} className="flex flex-col items-center">
                                                     <input
                                                         id={`mark-${rowIndex}-${colIndex}`}
                                                         type="number"
                                                         min="0"
+                                                        max={q.max}
                                                         disabled={!isEditing}
                                                         value={currentValue}
                                                         onChange={e => handleMarksChange(student.id, q.q, e.target.value, dynamicConfig)}
                                                         onKeyDown={(e) => handleKeyDown(e, rowIndex, colIndex)}
-                                                        className={`w-14 h-8 text-center border rounded-md focus:outline-none focus:ring-2 text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors
-                                                            ${isInvalid 
-                                                                ? 'border-red-500 bg-red-50 text-red-600 focus:border-red-500 focus:ring-red-500 dark:bg-red-900/20' 
-                                                                : 'dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:border-primary-500 focus:ring-primary-500'
-                                                            }
-                                                        `}
+                                                        className="w-14 h-8 text-center border rounded-md focus:outline-none focus:ring-2 focus:border-primary-500 focus:ring-primary-500 text-sm disabled:bg-transparent disabled:border-transparent disabled:text-gray-900 dark:disabled:text-white transition-colors font-bold dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                                                     />
-                                                    {isInvalid && (
-                                                        <div className="absolute z-40 bottom-full left-1/2 transform -translate-x-1/2 mb-1 hidden group-hover:block w-max bg-red-600 text-white text-[10px] font-bold py-1 px-2 rounded shadow-md">
-                                                            Max {q.max}
-                                                        </div>
-                                                    )}
                                                 </div>
                                             )})}
                                         </div>
@@ -682,9 +730,8 @@ const MarksEntryPage = () => {
                                         className={`p-2 rounded-md transition-colors ${
                                             isEditing 
                                             ? "text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30" 
-                                            : "text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/30"
+                                            : "text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-800"
                                         }`}
-                                        title={isEditing ? "Click to lock row" : "Click to edit"}
                                     >
                                         {isEditing ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                                     </button>
@@ -698,37 +745,26 @@ const MarksEntryPage = () => {
                       
                       return (
                         <tr key={student.id} className={isEditing ? "bg-blue-50 dark:bg-blue-900/20" : "hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"}>
-                          <td className="sticky left-0 bg-white dark:bg-gray-900 px-4 py-4 text-sm font-mono text-gray-700 dark:text-gray-300 border-r dark:border-gray-600 z-10">{student.usn}</td>
-                          <td className="sticky left-32 bg-white dark:bg-gray-900 px-4 py-4 text-sm font-medium text-gray-900 dark:text-white border-r dark:border-gray-600 z-10">{student.name}</td>
+                          <td className="sticky left-0 bg-inherit px-4 py-4 text-sm font-mono font-bold text-gray-700 dark:text-gray-300 border-r dark:border-gray-600 z-10">{student.usn}</td>
+                          <td className="sticky left-32 bg-inherit px-4 py-4 text-sm font-bold text-gray-900 dark:text-white border-r dark:border-gray-600 z-10">{student.name}</td>
                           
                           {currentToolConfig.questions.map((q, colIndex) => {
                               const currentValue = marks[student.id]?.[q.q] ?? '';
-                              const isInvalid = currentValue !== '' && currentValue > q.max;
 
                               return (
                               <td key={`${student.id}-${q.q}`} className="px-3 py-2 whitespace-nowrap text-center text-sm">
-                                  <div className="relative inline-block group">
+                                  <div className="relative inline-block">
                                       <input
                                       id={`mark-${rowIndex}-${colIndex}`}
                                       type="number"
                                       min="0"
+                                      max={q.max}
                                       disabled={!isEditing}
                                       value={currentValue}
                                       onChange={e => handleMarksChange(student.id, q.q, e.target.value)}
                                       onKeyDown={(e) => handleKeyDown(e, rowIndex, colIndex)}
-                                      className={`w-16 h-10 text-center border rounded-md disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed focus:outline-none focus:ring-2 transition-colors font-semibold text-sm
-                                            ${isInvalid 
-                                                ? 'border-red-500 bg-red-50 text-red-600 focus:border-red-500 focus:ring-red-500 dark:bg-red-900/20' 
-                                                : 'dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:border-primary-500 focus:ring-primary-500'
-                                            }
-                                      `}
+                                      className="w-16 h-10 text-center border rounded-md disabled:bg-transparent disabled:border-transparent disabled:text-gray-900 dark:disabled:text-white focus:outline-none focus:ring-2 focus:border-primary-500 focus:ring-primary-500 transition-colors font-bold text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
                                       />
-                                      {/* REAL TIME VALIDATION TOOLTIP */}
-                                      {isInvalid && (
-                                          <div className="absolute z-40 bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block w-max bg-red-600 text-white text-xs font-bold py-1 px-2 rounded shadow-lg">
-                                              Max mark is {q.max}
-                                          </div>
-                                      )}
                                   </div>
                               </td>
                           )})}
@@ -753,7 +789,7 @@ const MarksEntryPage = () => {
                                     className={`p-2 rounded-md transition-colors ${
                                         isEditing 
                                         ? "text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30" 
-                                        : "text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/30"
+                                        : "text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-gray-800"
                                     }`}
                                     title={isEditing ? "Click to lock row" : "Click to edit"}
                                 >

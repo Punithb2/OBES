@@ -3,6 +3,9 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.views import APIView
 from .calculation_services import calculate_course_attainment
+import csv
+import io
+from rest_framework.parsers import MultiPartParser, FormParser
 from .permissions import IsSuperAdmin, IsDepartmentAdmin, IsFacultyForCourse
 from .models import *
 from .serializers import *
@@ -130,12 +133,72 @@ class StudentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Student.objects.all()
         department = self.request.query_params.get('department')
+        course = self.request.query_params.get('course')
         
         if department:
-            # Find students enrolled in ANY course belonging to this department
             queryset = queryset.filter(courses__department=department).distinct()
+        if course:
+            queryset = queryset.filter(courses__id=course).distinct()
             
         return queryset
+
+    # --- NEW: SECURE BULK UPLOAD ENDPOINT ---
+    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def bulk_upload(self, request):
+        file = request.FILES.get('file')
+        course_id = request.data.get('course_id') # Which course to enroll them in
+
+        if not file:
+            return Response({"error": "No file provided"}, status=400)
+
+        if not course_id:
+            return Response({"error": "Course ID is required to map students"}, status=400)
+
+        try:
+            # Read the CSV file in memory
+            decoded_file = file.read().decode('utf-8')
+            io_string = io.StringIO(decoded_file)
+            reader = csv.reader(io_string)
+            
+            headers = next(reader, None) # Skip the header row (USN, Name)
+
+            created_count = 0
+            enrolled_count = 0
+
+            # Get the course object
+            course = Course.objects.get(id=course_id)
+
+            for row in reader:
+                # Safely skip empty rows or rows that don't have at least 2 columns
+                if not row or len(row) < 2: 
+                    continue 
+                
+                usn = str(row[0]).strip().upper()
+                name = str(row[1]).strip()
+
+                if usn and name:
+                    # THE FIX: Explicitly set the 'id' to the 'usn' in the defaults
+                    student, created = Student.objects.get_or_create(
+                        usn=usn,
+                        defaults={
+                            'id': usn,    # <--- This prevents the empty ID error
+                            'name': name
+                        }
+                    )
+                    if created:
+                        created_count += 1
+                    
+                    # 2. Enroll the student in the course
+                    if course not in student.courses.all():
+                        student.courses.add(course)
+                        enrolled_count += 1
+
+            return Response({
+                "message": f"Successfully created {created_count} new students and enrolled {enrolled_count} into the course."
+            }, status=200)
+
+        except Exception as e:
+            return Response({"error": f"Error parsing CSV: {str(e)}"}, status=500)
 
 class MarkViewSet(viewsets.ModelViewSet):
     queryset = Mark.objects.all()

@@ -23,6 +23,7 @@ export const adminNavigations = [
   { name: "Manage Faculty", path: "/admin/faculty", icon: "people" },
   { name: "Manage Courses", path: "/admin/manage-courses", icon: "book" },
   { name: "Assign Courses", path: "/admin/assign-courses", icon: "assignment_ind" },
+  { name: "Manage Students", path: "/admin/student-management", icon: "people_alt" },
   { name: "Manage Outcomes", path: "/admin/outcomes", icon: "assignment" },
   { name: "Consolidated Matrix", path: "/admin/consolidation", icon: "grid_on" },
   { name: "Program Matrix", path: "/admin/program-matrix", icon: "table_chart" },

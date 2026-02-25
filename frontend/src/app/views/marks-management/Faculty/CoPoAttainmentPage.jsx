@@ -10,19 +10,16 @@ const CoPoAttainmentPage = () => {
     const { user } = useAuth();
     const [loading, setLoading] = useState(true);
 
-    // --- GLOBAL STATES ---
     const [courses, setCourses] = useState([]);
     const [pos, setPos] = useState([]);
     const [psos, setPsos] = useState([]);
     
-    // --- LOCALIZED COURSE STATES ---
     const [selectedCourseId, setSelectedCourseId] = useState('');
     const [courseStudents, setCourseStudents] = useState([]);
     const [courseMarks, setCourseMarks] = useState([]);
     const [courseMatrix, setCourseMatrix] = useState({});
     const [reportData, setReportData] = useState(null); 
 
-    // --- 1. INITIAL LOAD ---
     useEffect(() => {
         const fetchBaseData = async () => {
             if (!user) return;
@@ -54,7 +51,6 @@ const CoPoAttainmentPage = () => {
 
     const selectedCourse = useMemo(() => courses.find(c => String(c.id) === String(selectedCourseId)), [courses, selectedCourseId]);
 
-    // --- 2. FETCH SPECIFIC COURSE DATA ---
     useEffect(() => {
         const fetchCourseData = async () => {
             if (!selectedCourseId) return;
@@ -63,19 +59,17 @@ const CoPoAttainmentPage = () => {
             
             try {
                 const [allStudents, fetchedMarks, allMatrices, reportRes] = await Promise.all([
-                    fetchAllPages('/students/'),
+                    fetchAllPages(`/students/?course=${selectedCourseId}`),
                     fetchAllPages(`/marks/?course=${selectedCourseId}`),
                     fetchAllPages('/articulation-matrix/'),
                     api.get(`/reports/course-attainment/${selectedCourseId}/`) 
                 ]);
 
-                setCourseStudents(Array.isArray(allStudents) ? allStudents.filter(s => s.courses && s.courses.includes(selectedCourseId)) : []);
-                
+                setCourseStudents(Array.isArray(allStudents) ? allStudents : []);
                 setCourseMarks(Array.isArray(fetchedMarks) ? fetchedMarks : []);
                 
                 const specificMatrix = Array.isArray(allMatrices) ? allMatrices.find(m => String(m.course) === String(selectedCourseId)) : null;
                 setCourseMatrix(specificMatrix ? specificMatrix.matrix : {});
-
                 setReportData(reportRes.data);
 
             } catch (error) {
@@ -87,12 +81,14 @@ const CoPoAttainmentPage = () => {
         fetchCourseData();
     }, [selectedCourseId]);
 
-    // --- 3. BUILD DYNAMIC CONFIG FROM SCHEME ---
     const courseConfig = useMemo(() => {
         if (!selectedCourse) return null;
 
-        const settings = selectedCourse.scheme_details?.settings || {};
-        const rules = settings.attainment_rules || settings; 
+        const schemeSettings = selectedCourse.scheme_details?.settings || {};
+        const courseSpecificSettings = selectedCourse.settings || {};
+        
+        const rules = schemeSettings.attainment_rules || schemeSettings.levelThresholds ? schemeSettings : courseSpecificSettings; 
+        const courseType = courseSpecificSettings.courseType || 'Theory';
 
         let levelsDict = rules.attainment_levels || rules.levelThresholds || { level_3: 70, level_2: 60, level_1: 50 };
         const sortedLevels = Object.entries(levelsDict)
@@ -110,12 +106,20 @@ const CoPoAttainmentPage = () => {
         const internalTools = rawTools.filter(t => t !== seeTool && t.type !== 'Improvement Test');
         
         const processTool = (tool) => {
-            let parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
-                co: coId, max: parseInt(max) || 0
-            }));
-            if (parts.length === 0) {
-                parts = (selectedCourse.cos || []).map(co => ({ co: co.id, max: tool.maxMarks }));
+            let parts = [];
+            
+            if (tool.type === 'Activity' || tool.type === 'Laboratory') {
+                parts = [{ co: 'Score', max: tool.maxMarks }];
+            } else {
+                // THE FIX: For both Theory and Lab IA, read the exact CO Distribution from config
+                parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
+                    co: coId, max: parseInt(max) || 0
+                }));
+                if (parts.length === 0) {
+                    parts = (selectedCourse.cos || []).map(co => ({ co: co.id, max: tool.maxMarks }));
+                }
             }
+
             return {
                 id: tool.name, title: tool.name, type: tool.type,
                 total: tool.maxMarks || 0, parts: parts, colSpan: (parts.length * 3) + 1
@@ -151,11 +155,11 @@ const CoPoAttainmentPage = () => {
             targetLevel, sortedLevels, weightage, groupedTools, 
             assessments: processedToolsFlat, 
             see: { total: seeTool?.maxMarks || 100, coMap: seeCoMap, colSpan: 3 },
-            schemeName: selectedCourse.scheme_details?.name || 'Default Scheme'
+            schemeName: selectedCourse.scheme_details?.name || 'Default Scheme',
+            courseType
         };
     }, [selectedCourse]);
 
-    // --- 4. CALCULATE RAW STUDENT MATRIX ---
     const data = useMemo(() => {
         if (!courseStudents.length || !courseConfig) return null;
 
@@ -183,10 +187,31 @@ const CoPoAttainmentPage = () => {
             }, 0);
         };
 
-        const normalize = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, ''); 
-        const extractNumber = (str) => {
-            const match = String(str).match(/(\d+)/);
-            return match ? match[1] : null;
+        // --- PROPORTIONAL DISTRIBUTION MATH ---
+        const normalizeScoresForLab = (rawScores, parts, toolMaxMarks) => {
+            if (!rawScores) return {};
+            const parsedScores = { ...rawScores };
+            const testVal = parsedScores['Test Marks'];
+            const ceVal = parsedScores['Continuous Eval'];
+            
+            if (testVal !== undefined || ceVal !== undefined) {
+                let isAbs = isStudentAbsent(testVal) && isStudentAbsent(ceVal);
+                let totalVal = 0;
+                
+                if (!isAbs) {
+                    totalVal = (parseFloat(testVal) || 0) + (parseFloat(ceVal) || 0);
+                }
+                
+                parts.forEach(p => { 
+                    if (isAbs) {
+                        parsedScores[p.co] = 'AB';
+                    } else {
+                        // Formula: (Total Obtained / Tool Max) * CO Max
+                        parsedScores[p.co] = toolMaxMarks > 0 ? (totalVal / toolMaxMarks) * p.max : 0;
+                    }
+                });
+            }
+            return parsedScores;
         };
 
         return courseStudents.map(student => {
@@ -195,63 +220,47 @@ const CoPoAttainmentPage = () => {
 
             courseConfig.assessments.forEach(assessment => {
                 let markRecord = studentMarks.find(m => m.assessment_name === assessment.id);
-                let scores = markRecord?.scores || {};
+                let scores = markRecord ? { ...markRecord.scores } : {};
                 let isOverridden = false;
 
-                const improvementRecord = studentMarks.find(m => {
-                    const targetNew = m.improvement_test_for;
-                    const targetOld = m.scores?._improvementTarget;
-                    
-                    if (!targetNew && !targetOld) return false;
-
-                    const target = targetNew || targetOld;
-                    const currentTitle = assessment.title;
-
-                    if (normalize(target) === normalize(currentTitle)) return true;
-
-                    const tNorm = normalize(target);
-                    const cNorm = normalize(currentTitle);
-                    const isInternal = (s) => s.includes('internal') || s.includes('ia') || s.includes('test');
-                    
-                    if (isInternal(tNorm) && isInternal(cNorm)) {
-                        const tNum = extractNumber(target);
-                        const cNum = extractNumber(currentTitle);
-                        if (tNum && cNum && tNum === cNum) return true;
-                    }
-                    return false;
-                });
-
-                if (improvementRecord && improvementRecord.scores) {
-                    const originalTotal = getScoreTotal(scores, assessment.parts);
-                    const impTotal = getScoreTotal(improvementRecord.scores, assessment.parts);
-
-                    if (impTotal > originalTotal) {
-                        scores = improvementRecord.scores;
-                        isOverridden = true;
-                    }
+                if (courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment') {
+                    scores = normalizeScoresForLab(scores, assessment.parts, assessment.total);
                 }
 
                 let currentTotal = 0;
                 const parts = assessment.parts.map(part => {
                     let rawVal = scores[part.co];
                     
-                    if (rawVal === undefined && Object.keys(scores).filter(k => !k.startsWith('_')).length === 1) {
-                         const singleVal = Object.values(scores).find(v => !String(v).startsWith('_'));
-                         if (singleVal !== undefined) rawVal = singleVal;
+                    if (rawVal === undefined && (assessment.type === 'Activity' || assessment.type === 'Laboratory')) {
+                        const singleVal = Object.values(scores).find(v => !String(v).startsWith('_'));
+                        if (singleVal !== undefined) rawVal = singleVal;
                     }
 
                     const absent = isStudentAbsent(rawVal);
                     const obtained = absent ? 0 : parseFloat(rawVal || 0);
-                    if (!absent) currentTotal += obtained;
+                    
+                    // Prevent counting the sum multiple times for labs
+                    if (!absent && !(courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment')) {
+                        currentTotal += obtained;
+                    }
+
                     const percentage = part.max > 0 ? (obtained / part.max) * 100 : 0;
                     return {
-                        co: part.co, max: part.max, obtained, isAbsent: absent,
+                        co: part.co, 
+                        max: part.max, 
+                        obtained: parseFloat(obtained.toFixed(1)), // Keep UI clean (e.g. 18.8)
+                        isAbsent: absent,
                         targetMet: !absent && percentage >= courseConfig.targetLevel,
                         score: getLevel(percentage)         
                     };
                 });
 
-                row.assessments[assessment.id] = { total: currentTotal, parts, isOverridden };
+                if (courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment') {
+                    // Display actual lab total (Test + CE)
+                    currentTotal = parts.reduce((sum, p) => sum + p.obtained, 0);
+                }
+
+                row.assessments[assessment.id] = { total: parseFloat(currentTotal.toFixed(1)), parts, isOverridden };
             });
 
             const seeRecord = studentMarks.find(m => m.assessment_name === 'SEE' || m.assessment_name === 'Semester End Exam');
@@ -274,7 +283,6 @@ const CoPoAttainmentPage = () => {
         });
     }, [courseStudents, courseMarks, courseConfig]);
 
-    // --- 5. CLASS AVERAGE FOOTER SUMMARY ---
     const summary = useMemo(() => {
         if (!data || !courseConfig) return null;
         const s = { assessments: {}, see: { yCount: 0, totalMarks: 0, absentCount: 0 } };
@@ -300,7 +308,6 @@ const CoPoAttainmentPage = () => {
         return s;
     }, [data, courseConfig]);
 
-    // --- 6. BUILD EXPECTED/ACTUAL PO GRID ---
     const poAttainmentGrid = useMemo(() => {
         if (!reportData || !selectedCourse || !courseMatrix) return null;
         
@@ -352,7 +359,6 @@ const CoPoAttainmentPage = () => {
         return { outcomes, expectedRows, expectedAvg, actualRows, actualAvg };
     }, [reportData, selectedCourse, courseMatrix, pos, psos]);
 
-    // --- 7. EXPORT TO EXCEL (WITH STYLING) ---
     const handleExportToExcel = () => {
         if (!selectedCourse || !reportData || !data || !courseConfig) {
             alert("No complete data available to export!");
@@ -360,49 +366,18 @@ const CoPoAttainmentPage = () => {
         }
 
         const workbook = XLSX.utils.book_new();
-
-        // -----------------------------------------------------
-        // SHEET 1: STUDENT MATRIX
-        // -----------------------------------------------------
-        
         const headerStyle = {
             font: { bold: true, color: { rgb: "000000" }, sz: 11 },
             fill: { fgColor: { rgb: "E2E8F0" } },
             alignment: { horizontal: "center", vertical: "center", wrapText: true },
-            border: {
-                top: { style: "thin", color: { rgb: "94A3B8" } },
-                bottom: { style: "thin", color: { rgb: "94A3B8" } },
-                left: { style: "thin", color: { rgb: "94A3B8" } },
-                right: { style: "thin", color: { rgb: "94A3B8" } }
-            }
+            border: { top: { style: "thin", color: { rgb: "94A3B8" } }, bottom: { style: "thin", color: { rgb: "94A3B8" } }, left: { style: "thin", color: { rgb: "94A3B8" } }, right: { style: "thin", color: { rgb: "94A3B8" } } }
         };
-
         const greenHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "DCFCE7" } } }; 
         const blueHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "DBEAFE" } } }; 
         const yellowHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "FEF08A" } } }; 
         const orangeHeaderStyle = { ...headerStyle, fill: { fgColor: { rgb: "FFEDD5" } } }; 
-
-        const dataStyle = {
-            alignment: { horizontal: "center", vertical: "center" },
-            border: {
-                top: { style: "thin", color: { rgb: "E2E8F0" } },
-                bottom: { style: "thin", color: { rgb: "E2E8F0" } },
-                left: { style: "thin", color: { rgb: "E2E8F0" } },
-                right: { style: "thin", color: { rgb: "E2E8F0" } }
-            }
-        };
-
-        const footerStyle = {
-            font: { bold: true, color: { rgb: "FFFFFF" } },
-            fill: { fgColor: { rgb: "8B5A2B" } }, 
-            alignment: { horizontal: "center", vertical: "center" },
-            border: {
-                top: { style: "medium", color: { rgb: "000000" } },
-                bottom: { style: "thin", color: { rgb: "E2E8F0" } },
-                left: { style: "thin", color: { rgb: "E2E8F0" } },
-                right: { style: "thin", color: { rgb: "E2E8F0" } }
-            }
-        };
+        const dataStyle = { alignment: { horizontal: "center", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "E2E8F0" } }, bottom: { style: "thin", color: { rgb: "E2E8F0" } }, left: { style: "thin", color: { rgb: "E2E8F0" } }, right: { style: "thin", color: { rgb: "E2E8F0" } } } };
+        const footerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "8B5A2B" } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: { style: "medium", color: { rgb: "000000" } }, bottom: { style: "thin", color: { rgb: "E2E8F0" } }, left: { style: "thin", color: { rgb: "E2E8F0" } }, right: { style: "thin", color: { rgb: "E2E8F0" } } } };
 
         let topHeaderRow = ["Sl.No.", "USN", "Name"];
         let midHeaderRow = ["", "", ""];
@@ -413,18 +388,10 @@ const CoPoAttainmentPage = () => {
                 topHeaderRow.push(`${assessment.title}`);
                 midHeaderRow.push(`Internal`);
                 bottomHeaderRow.push(`${part.co}`);
-                
-                topHeaderRow.push("");
-                midHeaderRow.push("");
-                bottomHeaderRow.push("Lvl");
-
-                topHeaderRow.push("");
-                midHeaderRow.push("");
-                bottomHeaderRow.push("Met?");
+                topHeaderRow.push(""); midHeaderRow.push(""); bottomHeaderRow.push("Lvl");
+                topHeaderRow.push(""); midHeaderRow.push(""); bottomHeaderRow.push("Met?");
             });
-            topHeaderRow.push("");
-            midHeaderRow.push("");
-            bottomHeaderRow.push("Total");
+            topHeaderRow.push(""); midHeaderRow.push(""); bottomHeaderRow.push("Total");
         });
 
         topHeaderRow.push("SEE", "", "");
@@ -435,7 +402,6 @@ const CoPoAttainmentPage = () => {
 
         data.forEach((row, idx) => {
             let rowData = [idx + 1, row.student.usn, row.student.name];
-
             courseConfig.assessments.forEach(assessment => {
                 const aData = row.assessments[assessment.id];
                 aData.parts.forEach(part => {
@@ -445,27 +411,22 @@ const CoPoAttainmentPage = () => {
                 });
                 rowData.push(aData.total);
             });
-
             rowData.push(row.see.isAbsent ? 'AB' : row.see.obtained);
             rowData.push(row.see.isAbsent ? '-' : row.see.score);
             rowData.push(row.see.isAbsent ? '-' : (row.see.targetMet ? 'Y' : 'N'));
-
             aoaData.push(rowData);
         });
 
         if (summary) {
             aoaData.push([]); 
             const labels = [
-                { key: 'avgMarks', title: "Class Average" }, 
-                { key: 'absentCount', title: "No. of Absents (AB)" }, 
-                { key: 'yCount', title: "No. of Students >= Target" }, 
-                { key: 'percentage', title: "% Above Target" }, 
+                { key: 'avgMarks', title: "Class Average" }, { key: 'absentCount', title: "No. of Absents (AB)" }, 
+                { key: 'yCount', title: "No. of Students >= Target" }, { key: 'percentage', title: "% Above Target" }, 
                 { key: 'level', title: "Attainment Level" }
             ];
 
             labels.forEach(labelRow => {
                 let sumRow = ["", "", labelRow.title];
-
                 courseConfig.assessments.forEach(assessment => {
                     assessment.parts.forEach((part, pIdx) => {
                         const stats = summary.assessments[assessment.id].parts[pIdx];
@@ -483,7 +444,6 @@ const CoPoAttainmentPage = () => {
                             const match = courseConfig.sortedLevels.find(l => percent >= l.threshold); 
                             val = match ? match.level : 0; 
                         }
-
                         sumRow.push(val, "", "");
                     });
                     sumRow.push(""); 
@@ -510,7 +470,6 @@ const CoPoAttainmentPage = () => {
         }
 
         const wsStudent = XLSX.utils.aoa_to_sheet(aoaData);
-
         for (let R = 0; R < aoaData.length; ++R) {
             for (let C = 0; C < aoaData[R].length; ++C) {
                 const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
@@ -532,90 +491,55 @@ const CoPoAttainmentPage = () => {
                 }
             }
         }
-
         const wscols = [{ wch: 6 }, { wch: 15 }, { wch: 30 }];
         for (let i = 3; i < aoaData[0].length; i++) wscols.push({ wch: 8 });
         wsStudent['!cols'] = wscols;
 
-        const merges = [];
-        merges.push({ s: { r: 0, c: 0 }, e: { r: 2, c: 0 } }); 
-        merges.push({ s: { r: 0, c: 1 }, e: { r: 2, c: 1 } }); 
-        merges.push({ s: { r: 0, c: 2 }, e: { r: 2, c: 2 } }); 
-        wsStudent['!merges'] = merges;
-
+        wsStudent['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 2, c: 0 } }, { s: { r: 0, c: 1 }, e: { r: 2, c: 1 } }, { s: { r: 0, c: 2 }, e: { r: 2, c: 2 } }];
         XLSX.utils.book_append_sheet(workbook, wsStudent, "Student Matrix");
 
-        // -----------------------------------------------------
-        // SHEET 2: CO ATTAINMENT SUMMARY 
-        // -----------------------------------------------------
         const coHeaders = ["Course Outcome (CO)", "CIE Avg Level", "SEE Avg Level", "Direct Attainment (DA)", "Indirect Attainment (IA)", "Final Score Index"];
         const coDataArr = [coHeaders];
-
         reportData.co_attainment.forEach(row => {
             const courseCo = (selectedCourse.cos || []).find(c => c.id === row.co);
             coDataArr.push([
                 `${row.co} - ${courseCo ? courseCo.description : ''}`,
-                row.cie_level.toFixed(2),
-                row.see_level.toFixed(2),
-                row.direct_attainment.toFixed(2),
-                row.indirect_attainment.toFixed(2),
-                row.score_index.toFixed(2)
+                row.cie_level.toFixed(2), row.see_level.toFixed(2), row.direct_attainment.toFixed(2),
+                row.indirect_attainment.toFixed(2), row.score_index.toFixed(2)
             ]);
         });
-
         const wsCO = XLSX.utils.aoa_to_sheet(coDataArr);
-        
         for (let R = 0; R < coDataArr.length; ++R) {
             for (let C = 0; C < coDataArr[R].length; ++C) {
                 const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
                 if (!wsCO[cellRef]) continue;
-
-                if (R === 0) {
-                    wsCO[cellRef].s = headerStyle;
-                    if (C === 5) wsCO[cellRef].s = greenHeaderStyle; 
-                } else {
-                    wsCO[cellRef].s = dataStyle;
-                }
+                if (R === 0) { wsCO[cellRef].s = headerStyle; if (C === 5) wsCO[cellRef].s = greenHeaderStyle; } 
+                else wsCO[cellRef].s = dataStyle;
             }
         }
         wsCO['!cols'] = [{ wch: 60 }, { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 20 }];
         XLSX.utils.book_append_sheet(workbook, wsCO, "CO Attainment");
 
-        // -----------------------------------------------------
-        // SHEET 3: ACTUAL PO ATTAINMENT 
-        // -----------------------------------------------------
         if (poAttainmentGrid && poAttainmentGrid.actualRows) {
             const poHeadersRow = ["CO", ...poAttainmentGrid.outcomes.map(o => o.id)];
             const poDataArr = [poHeadersRow];
-
             poAttainmentGrid.actualRows.forEach(row => {
                 const rowData = [row.co];
-                poAttainmentGrid.outcomes.forEach(o => {
-                    rowData.push(row.values[o.id]);
-                });
+                poAttainmentGrid.outcomes.forEach(o => rowData.push(row.values[o.id]));
                 poDataArr.push(rowData);
             });
-            
             const avgRowData = ["AVG"];
-            poAttainmentGrid.outcomes.forEach(o => {
-                avgRowData.push(poAttainmentGrid.actualAvg[o.id]);
-            });
+            poAttainmentGrid.outcomes.forEach(o => avgRowData.push(poAttainmentGrid.actualAvg[o.id]));
             poDataArr.push(avgRowData);
 
             const wsPO = XLSX.utils.aoa_to_sheet(poDataArr);
-
             for (let R = 0; R < poDataArr.length; ++R) {
                 for (let C = 0; C < poDataArr[R].length; ++C) {
                     const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
                     if (!wsPO[cellRef]) continue;
-
-                    if (R === 0) {
-                        wsPO[cellRef].s = blueHeaderStyle;
-                    } else if (R === poDataArr.length - 1) {
-                        wsPO[cellRef].s = { ...footerStyle, fill: { fgColor: { rgb: "E2E8F0" } }, font: { bold: true, color: { rgb: "000000" } } };
-                    } else {
-                        wsPO[cellRef].s = dataStyle;
-                    }
+                    if (R === 0) wsPO[cellRef].s = blueHeaderStyle;
+                    else if (R === poDataArr.length - 1) wsPO[cellRef].s = { ...footerStyle, fill: { fgColor: { rgb: "E2E8F0" } }, font: { bold: true, color: { rgb: "000000" } } };
+                    else wsPO[cellRef].s = dataStyle;
                 }
             }
             wsPO['!cols'] = [{ wch: 15 }, ...poAttainmentGrid.outcomes.map(() => ({ wch: 10 }))];
@@ -625,12 +549,9 @@ const CoPoAttainmentPage = () => {
         XLSX.writeFile(workbook, `${selectedCourse.code}_Full_Attainment_Report.xlsx`);
     };
 
-    if (loading) {
-        return <CoPoAttainmentSkeleton />;
-    }
+    if (loading) return <CoPoAttainmentSkeleton />;
     if (!user) return null;
 
-    // --- RENDER HELPERS ---
     const renderTableHeader = () => (
         <thead className="text-center text-xs font-bold text-gray-800 bg-gray-200 dark:bg-gray-800 dark:text-gray-200 uppercase border-b-2 border-gray-400">
             <tr>
@@ -720,7 +641,6 @@ const CoPoAttainmentPage = () => {
                 <div>
                     <h1 className="text-3xl font-bold text-gray-800 dark:text-white">CO-PO Attainment</h1>
                     
-                    {/* NEW: SCHEME NAME AND DYNAMIC SETTINGS BADGES */}
                     <div className="flex flex-col gap-2 mt-2">
                         <p className="text-sm text-gray-500 dark:text-gray-400">
                             Scheme: <span className="font-bold text-primary-600 dark:text-primary-400">{courseConfig?.schemeName || 'Loading...'}</span>
@@ -743,7 +663,7 @@ const CoPoAttainmentPage = () => {
                 </div>
                 
                 <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                    <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} className="block w-full sm:w-80 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white" disabled={loading}>
+                    <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} className="block w-full sm:w-80 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white font-bold" disabled={loading}>
                         {courses.map(course => <option key={course.id} value={course.id}>{course.code} - {course.name}</option>)}
                         {courses.length === 0 && <option>No courses assigned</option>}
                     </select>
@@ -751,7 +671,7 @@ const CoPoAttainmentPage = () => {
                     <button 
                         onClick={handleExportToExcel}
                         disabled={!selectedCourse || !reportData || !data || loading}
-                        className="flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium shadow-sm disabled:opacity-50 whitespace-nowrap"
+                        className="flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-bold shadow-sm disabled:opacity-50 whitespace-nowrap"
                         title="Export Attainment Report to Excel"
                     >
                         <Download className="w-4 h-4 sm:mr-2" />
@@ -776,17 +696,18 @@ const CoPoAttainmentPage = () => {
                                             <td className="sticky left-40 bg-white dark:bg-gray-900 border-r border-gray-300 p-2 text-left whitespace-nowrap overflow-hidden text-ellipsis max-w-[12rem]" title={row.student.name}>{row.student.name}</td>
                                             {courseConfig.assessments.map(assessment => {
                                                 const aData = row.assessments[assessment.id];
-                                                const overrideClass = aData.isOverridden ? 'bg-yellow-50 dark:bg-yellow-900/20' : '';
+                                                const overrideTotalClass = aData.isOverridden ? 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-900 dark:text-yellow-100' : 'bg-gray-50 dark:bg-gray-800';
+
                                                 return (
                                                     <React.Fragment key={assessment.id}>
                                                         {aData.parts.map((part, pIdx) => (
                                                             <React.Fragment key={`row-${assessment.id}-${pIdx}`}>
-                                                                <td className={`border-r border-gray-300 px-1 text-gray-500 ${overrideClass}`}>{part.isAbsent ? 'AB' : part.obtained}</td>
-                                                                <td className={`border-r border-gray-300 px-1 font-semibold text-blue-600 dark:text-blue-400 ${overrideClass}`}>{part.isAbsent ? '-' : part.score}</td>
-                                                                <td className={`border-r border-gray-300 px-1 font-bold ${part.targetMet ? 'text-green-600' : 'text-red-500'} ${overrideClass}`}>{part.isAbsent ? '-' : (part.targetMet ? 'Y' : 'N')}</td>
+                                                                <td className={`border-r border-gray-300 px-1 text-gray-500 dark:text-gray-400`}>{part.isAbsent ? 'AB' : part.obtained}</td>
+                                                                <td className={`border-r border-gray-300 px-1 font-semibold text-blue-600 dark:text-blue-400`}>{part.isAbsent ? '-' : part.score}</td>
+                                                                <td className={`border-r border-gray-300 px-1 font-bold ${part.targetMet ? 'text-green-600' : 'text-red-500'}`}>{part.isAbsent ? '-' : (part.targetMet ? 'Y' : 'N')}</td>
                                                             </React.Fragment>
                                                         ))}
-                                                        <td className="border-r border-gray-300 px-1 font-bold bg-gray-50 dark:bg-gray-800">{aData.total}</td>
+                                                        <td className={`border-r border-gray-300 px-1 font-bold ${overrideTotalClass}`}>{aData.total}</td>
                                                     </React.Fragment>
                                                 );
                                             })}
