@@ -110,8 +110,9 @@ const CoPoAttainmentPage = () => {
             
             if (tool.type === 'Activity' || tool.type === 'Laboratory') {
                 parts = [{ co: 'Score', max: tool.maxMarks }];
+            } else if (courseType === 'Lab' && tool.type === 'Internal Assessment') {
+                parts = (selectedCourse.cos || []).map(co => ({ co: co.id, max: tool.maxMarks }));
             } else {
-                // THE FIX: For both Theory and Lab IA, read the exact CO Distribution from config
                 parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
                     co: coId, max: parseInt(max) || 0
                 }));
@@ -130,19 +131,37 @@ const CoPoAttainmentPage = () => {
         const processedToolsFlat = []; 
         const buckets = {};
 
+        // THE FIX: Separate Laboratory components from Internal Assessments
         internalTools.forEach(tool => {
             const match = tool.name.match(/(\d+)/);
             const num = match ? match[1] : 'Other';
-            if (!buckets[num]) buckets[num] = [];
-            buckets[num].push(tool);
+            
+            const bucketKey = tool.type === 'Laboratory' ? `Lab-${num}` : num;
+            
+            if (!buckets[bucketKey]) buckets[bucketKey] = [];
+            buckets[bucketKey].push(tool);
         });
 
         Object.keys(buckets).sort().forEach(key => {
             const groupTools = buckets[key].map(processTool);
             processedToolsFlat.push(...groupTools);
+            
+            let groupTitle = '';
+            let groupBg = '';
+
+            if (key.startsWith('Lab-')) {
+                const labNum = key.replace('Lab-', '');
+                groupTitle = labNum === 'Other' ? 'Laboratory Assessments' : `Laboratory ${labNum}`;
+                groupBg = 'bg-teal-400 dark:bg-teal-900 text-gray-900 dark:text-white';
+            } else {
+                groupTitle = key === 'Other' ? 'Other Assessments' : `Internal Assessment ${key}`;
+                groupBg = 'bg-purple-400 dark:bg-purple-900 text-gray-900 dark:text-white';
+            }
+
             groupedTools.push({
                 id: `group-${key}`,
-                title: key === 'Other' ? 'Other Assessments' : `Internal Assessment ${key}`,
+                title: groupTitle,
+                groupBg: groupBg,
                 tools: groupTools,
                 groupMax: groupTools.reduce((sum, t) => sum + t.total, 0),
                 totalColSpan: groupTools.reduce((sum, t) => sum + t.colSpan, 0)
@@ -187,7 +206,12 @@ const CoPoAttainmentPage = () => {
             }, 0);
         };
 
-        // --- PROPORTIONAL DISTRIBUTION MATH ---
+        const normalize = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, ''); 
+        const extractNumber = (str) => {
+            const match = String(str).match(/(\d+)/);
+            return match ? match[1] : null;
+        };
+
         const normalizeScoresForLab = (rawScores, parts, toolMaxMarks) => {
             if (!rawScores) return {};
             const parsedScores = { ...rawScores };
@@ -206,7 +230,6 @@ const CoPoAttainmentPage = () => {
                     if (isAbs) {
                         parsedScores[p.co] = 'AB';
                     } else {
-                        // Formula: (Total Obtained / Tool Max) * CO Max
                         parsedScores[p.co] = toolMaxMarks > 0 ? (totalVal / toolMaxMarks) * p.max : 0;
                     }
                 });
@@ -227,6 +250,39 @@ const CoPoAttainmentPage = () => {
                     scores = normalizeScoresForLab(scores, assessment.parts, assessment.total);
                 }
 
+                const improvementRecord = studentMarks.find(m => {
+                    const targetNew = m.improvement_test_for;
+                    const targetOld = m.scores?._improvementTarget;
+                    if (!targetNew && !targetOld) return false;
+                    const target = targetNew || targetOld;
+                    const currentTitle = assessment.title;
+                    if (normalize(target) === normalize(currentTitle)) return true;
+                    const tNorm = normalize(target);
+                    const cNorm = normalize(currentTitle);
+                    const isInternal = (s) => s.includes('internal') || s.includes('ia') || s.includes('test');
+                    if (isInternal(tNorm) && isInternal(cNorm)) {
+                        const tNum = extractNumber(target);
+                        const cNum = extractNumber(currentTitle);
+                        if (tNum && cNum && tNum === cNum) return true;
+                    }
+                    return false;
+                });
+
+                if (improvementRecord && improvementRecord.scores) {
+                    let impScores = { ...improvementRecord.scores };
+                    if (courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment') {
+                        impScores = normalizeScoresForLab(impScores, assessment.parts, assessment.total);
+                    }
+
+                    const originalTotal = getScoreTotal(scores, assessment.parts);
+                    const impTotal = getScoreTotal(impScores, assessment.parts);
+
+                    if (impTotal > originalTotal) {
+                        scores = impScores;
+                        isOverridden = true;
+                    }
+                }
+
                 let currentTotal = 0;
                 const parts = assessment.parts.map(part => {
                     let rawVal = scores[part.co];
@@ -239,7 +295,6 @@ const CoPoAttainmentPage = () => {
                     const absent = isStudentAbsent(rawVal);
                     const obtained = absent ? 0 : parseFloat(rawVal || 0);
                     
-                    // Prevent counting the sum multiple times for labs
                     if (!absent && !(courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment')) {
                         currentTotal += obtained;
                     }
@@ -248,7 +303,7 @@ const CoPoAttainmentPage = () => {
                     return {
                         co: part.co, 
                         max: part.max, 
-                        obtained: parseFloat(obtained.toFixed(1)), // Keep UI clean (e.g. 18.8)
+                        obtained: parseFloat(obtained.toFixed(1)), 
                         isAbsent: absent,
                         targetMet: !absent && percentage >= courseConfig.targetLevel,
                         score: getLevel(percentage)         
@@ -256,7 +311,6 @@ const CoPoAttainmentPage = () => {
                 });
 
                 if (courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment') {
-                    // Display actual lab total (Test + CE)
                     currentTotal = parts.reduce((sum, p) => sum + p.obtained, 0);
                 }
 
@@ -386,7 +440,9 @@ const CoPoAttainmentPage = () => {
         courseConfig.assessments.forEach(assessment => {
             assessment.parts.forEach(part => {
                 topHeaderRow.push(`${assessment.title}`);
-                midHeaderRow.push(`Internal`);
+                // Use correct subheader text for Excel
+                let midType = assessment.type === 'Internal Assessment' ? 'Internal' : assessment.type;
+                midHeaderRow.push(midType);
                 bottomHeaderRow.push(`${part.co}`);
                 topHeaderRow.push(""); midHeaderRow.push(""); bottomHeaderRow.push("Lvl");
                 topHeaderRow.push(""); midHeaderRow.push(""); bottomHeaderRow.push("Met?");
@@ -559,7 +615,7 @@ const CoPoAttainmentPage = () => {
                 <th rowSpan={3} className="sticky left-12 z-20 bg-gray-300 dark:bg-gray-800 border-r border-gray-400 p-2 w-28 align-middle">USN</th>
                 <th rowSpan={3} className="sticky left-40 z-20 bg-gray-300 dark:bg-gray-800 border-r border-gray-400 p-2 w-48 align-middle">Name</th>
                 {courseConfig?.groupedTools.map(group => (
-                    <th key={group.id} colSpan={group.totalColSpan} className="bg-purple-400 dark:bg-purple-900 border-r border-gray-400 py-2 border-b">
+                    <th key={group.id} colSpan={group.totalColSpan} className={`${group.groupBg} border-r border-gray-400 py-2 border-b`}>
                         {group.title} <span className="text-[10px]">({group.groupMax})</span>
                     </th>
                 ))}
@@ -570,12 +626,15 @@ const CoPoAttainmentPage = () => {
             <tr>
                 {courseConfig?.groupedTools.map(group => (
                     <React.Fragment key={group.id}>
-                        {group.tools.map(tool => (
-                            <th key={tool.id} colSpan={tool.colSpan} className="bg-purple-200 dark:bg-purple-800/50 border-r border-gray-400 py-1 border-b">
-                                {tool.type === 'Internal Assessment' ? 'Internal' : tool.title.split(' ').slice(0, 1)} 
-                                <span className="text-[9px] ml-1">({tool.total})</span>
-                            </th>
-                        ))}
+                        {group.tools.map(tool => {
+                            const toolBg = tool.type === 'Laboratory' ? 'bg-teal-200 dark:bg-teal-800/50' : 'bg-purple-200 dark:bg-purple-800/50';
+                            return (
+                                <th key={tool.id} colSpan={tool.colSpan} className={`${toolBg} border-r border-gray-400 py-1 border-b`}>
+                                    {tool.type === 'Internal Assessment' ? 'Internal' : tool.title.split(' ').slice(0, 1)} 
+                                    <span className="text-[9px] ml-1">({tool.total})</span>
+                                </th>
+                            );
+                        })}
                     </React.Fragment>
                 ))}
             </tr>
@@ -730,7 +789,6 @@ const CoPoAttainmentPage = () => {
                 </div>
             )}
 
-            {/* --- FINAL BACKEND SUMMARIES --- */}
             {reportData && (
                 <div className="mt-8 space-y-6">
                     <Card className="shadow-sm">

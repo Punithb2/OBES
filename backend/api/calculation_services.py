@@ -191,7 +191,7 @@ def _calculate_final_score_index(co_stats, course, settings):
     final_scores = []
     for co_id, stats in co_stats.items():
         direct = (stats['cie_level'] + stats['see_level']) / 2.0
-        indirect = float(indirect_attainment_map.get(co_id, 3.0))
+        indirect = float(indirect_attainment_map.get(co_id, 0.0))
         score_index = (direct * w_direct) + (indirect * w_indirect)
         
         final_scores.append({
