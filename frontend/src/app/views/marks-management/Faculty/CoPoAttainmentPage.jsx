@@ -111,7 +111,6 @@ const CoPoAttainmentPage = () => {
             if (tool.type === 'Activity' || tool.type === 'Laboratory') {
                 parts = [{ co: 'Score', max: tool.maxMarks }];
             } else {
-                // THE FIX: For both Theory and Lab IA, read the exact CO Distribution from config
                 parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
                     co: coId, max: parseInt(max) || 0
                 }));
@@ -130,7 +129,6 @@ const CoPoAttainmentPage = () => {
         const processedToolsFlat = []; 
         const buckets = {};
 
-        // THE FIX: Separate Laboratory components from Internal Assessments
         internalTools.forEach(tool => {
             const match = tool.name.match(/(\d+)/);
             const num = match ? match[1] : 'Other';
@@ -167,7 +165,6 @@ const CoPoAttainmentPage = () => {
             });
         });
 
-
         const seeCoMap = seeTool?.coDistribution ? Object.keys(seeTool.coDistribution) : (selectedCourse.cos || []).map(c => c.id);
 
         return {
@@ -189,6 +186,7 @@ const CoPoAttainmentPage = () => {
         };
 
         const isStudentAbsent = (val) => ['AB', 'ABSENT', 'A', 'NA', '-'].includes(String(val || '').toUpperCase().trim());
+        const normalizeStr = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
         const getScoreTotal = (scores, parts) => {
             if (!scores) return 0;
@@ -206,7 +204,6 @@ const CoPoAttainmentPage = () => {
             }, 0);
         };
 
-        // --- PROPORTIONAL DISTRIBUTION MATH ---
         const normalizeScoresForLab = (rawScores, parts, toolMaxMarks) => {
             if (!rawScores) return {};
             const parsedScores = { ...rawScores };
@@ -225,7 +222,6 @@ const CoPoAttainmentPage = () => {
                     if (isAbs) {
                         parsedScores[p.co] = 'AB';
                     } else {
-                        // Formula: (Total Obtained / Tool Max) * CO Max
                         parsedScores[p.co] = toolMaxMarks > 0 ? (totalVal / toolMaxMarks) * p.max : 0;
                     }
                 });
@@ -246,6 +242,29 @@ const CoPoAttainmentPage = () => {
                     scores = normalizeScoresForLab(scores, assessment.parts, assessment.total);
                 }
 
+                // --- NEW: IMPROVEMENT TEST LOGIC OVERRIDE ---
+                let impRecord = studentMarks.find(m => 
+                    normalizeStr(m.improvement_test_for) === normalizeStr(assessment.id) || 
+                    normalizeStr(m.scores?._improvementTarget) === normalizeStr(assessment.id)
+                );
+
+                if (impRecord && impRecord.scores) {
+                    let impScores = { ...impRecord.scores };
+                    
+                    if (courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment') {
+                        impScores = normalizeScoresForLab(impScores, assessment.parts, assessment.total);
+                    }
+
+                    let origTotal = getScoreTotal(scores, assessment.parts);
+                    let impTotal = getScoreTotal(impScores, assessment.parts);
+
+                    if (impTotal > origTotal) {
+                        scores = impScores;
+                        isOverridden = true;
+                    }
+                }
+                // --- END IMPROVEMENT LOGIC ---
+
                 let currentTotal = 0;
                 const parts = assessment.parts.map(part => {
                     let rawVal = scores[part.co];
@@ -258,7 +277,6 @@ const CoPoAttainmentPage = () => {
                     const absent = isStudentAbsent(rawVal);
                     const obtained = absent ? 0 : parseFloat(rawVal || 0);
                     
-                    // Prevent counting the sum multiple times for labs
                     if (!absent && !(courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment')) {
                         currentTotal += obtained;
                     }
@@ -267,7 +285,7 @@ const CoPoAttainmentPage = () => {
                     return {
                         co: part.co, 
                         max: part.max, 
-                        obtained: parseFloat(obtained.toFixed(1)), // Keep UI clean (e.g. 18.8)
+                        obtained: parseFloat(obtained.toFixed(1)), 
                         isAbsent: absent,
                         targetMet: !absent && percentage >= courseConfig.targetLevel,
                         score: getLevel(percentage)         
@@ -275,7 +293,6 @@ const CoPoAttainmentPage = () => {
                 });
 
                 if (courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment') {
-                    // Display actual lab total (Test + CE)
                     currentTotal = parts.reduce((sum, p) => sum + p.obtained, 0);
                 }
 
