@@ -110,9 +110,8 @@ const CoPoAttainmentPage = () => {
             
             if (tool.type === 'Activity' || tool.type === 'Laboratory') {
                 parts = [{ co: 'Score', max: tool.maxMarks }];
-            } else if (courseType === 'Lab' && tool.type === 'Internal Assessment') {
-                parts = (selectedCourse.cos || []).map(co => ({ co: co.id, max: tool.maxMarks }));
             } else {
+                // THE FIX: For both Theory and Lab IA, read the exact CO Distribution from config
                 parts = Object.entries(tool.coDistribution || {}).map(([coId, max]) => ({
                     co: coId, max: parseInt(max) || 0
                 }));
@@ -168,6 +167,7 @@ const CoPoAttainmentPage = () => {
             });
         });
 
+
         const seeCoMap = seeTool?.coDistribution ? Object.keys(seeTool.coDistribution) : (selectedCourse.cos || []).map(c => c.id);
 
         return {
@@ -206,12 +206,7 @@ const CoPoAttainmentPage = () => {
             }, 0);
         };
 
-        const normalize = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, ''); 
-        const extractNumber = (str) => {
-            const match = String(str).match(/(\d+)/);
-            return match ? match[1] : null;
-        };
-
+        // --- PROPORTIONAL DISTRIBUTION MATH ---
         const normalizeScoresForLab = (rawScores, parts, toolMaxMarks) => {
             if (!rawScores) return {};
             const parsedScores = { ...rawScores };
@@ -230,6 +225,7 @@ const CoPoAttainmentPage = () => {
                     if (isAbs) {
                         parsedScores[p.co] = 'AB';
                     } else {
+                        // Formula: (Total Obtained / Tool Max) * CO Max
                         parsedScores[p.co] = toolMaxMarks > 0 ? (totalVal / toolMaxMarks) * p.max : 0;
                     }
                 });
@@ -250,39 +246,6 @@ const CoPoAttainmentPage = () => {
                     scores = normalizeScoresForLab(scores, assessment.parts, assessment.total);
                 }
 
-                const improvementRecord = studentMarks.find(m => {
-                    const targetNew = m.improvement_test_for;
-                    const targetOld = m.scores?._improvementTarget;
-                    if (!targetNew && !targetOld) return false;
-                    const target = targetNew || targetOld;
-                    const currentTitle = assessment.title;
-                    if (normalize(target) === normalize(currentTitle)) return true;
-                    const tNorm = normalize(target);
-                    const cNorm = normalize(currentTitle);
-                    const isInternal = (s) => s.includes('internal') || s.includes('ia') || s.includes('test');
-                    if (isInternal(tNorm) && isInternal(cNorm)) {
-                        const tNum = extractNumber(target);
-                        const cNum = extractNumber(currentTitle);
-                        if (tNum && cNum && tNum === cNum) return true;
-                    }
-                    return false;
-                });
-
-                if (improvementRecord && improvementRecord.scores) {
-                    let impScores = { ...improvementRecord.scores };
-                    if (courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment') {
-                        impScores = normalizeScoresForLab(impScores, assessment.parts, assessment.total);
-                    }
-
-                    const originalTotal = getScoreTotal(scores, assessment.parts);
-                    const impTotal = getScoreTotal(impScores, assessment.parts);
-
-                    if (impTotal > originalTotal) {
-                        scores = impScores;
-                        isOverridden = true;
-                    }
-                }
-
                 let currentTotal = 0;
                 const parts = assessment.parts.map(part => {
                     let rawVal = scores[part.co];
@@ -295,6 +258,7 @@ const CoPoAttainmentPage = () => {
                     const absent = isStudentAbsent(rawVal);
                     const obtained = absent ? 0 : parseFloat(rawVal || 0);
                     
+                    // Prevent counting the sum multiple times for labs
                     if (!absent && !(courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment')) {
                         currentTotal += obtained;
                     }
@@ -303,7 +267,7 @@ const CoPoAttainmentPage = () => {
                     return {
                         co: part.co, 
                         max: part.max, 
-                        obtained: parseFloat(obtained.toFixed(1)), 
+                        obtained: parseFloat(obtained.toFixed(1)), // Keep UI clean (e.g. 18.8)
                         isAbsent: absent,
                         targetMet: !absent && percentage >= courseConfig.targetLevel,
                         score: getLevel(percentage)         
@@ -311,6 +275,7 @@ const CoPoAttainmentPage = () => {
                 });
 
                 if (courseConfig.courseType === 'Lab' && assessment.type === 'Internal Assessment') {
+                    // Display actual lab total (Test + CE)
                     currentTotal = parts.reduce((sum, p) => sum + p.obtained, 0);
                 }
 
@@ -440,9 +405,7 @@ const CoPoAttainmentPage = () => {
         courseConfig.assessments.forEach(assessment => {
             assessment.parts.forEach(part => {
                 topHeaderRow.push(`${assessment.title}`);
-                // Use correct subheader text for Excel
-                let midType = assessment.type === 'Internal Assessment' ? 'Internal' : assessment.type;
-                midHeaderRow.push(midType);
+                midHeaderRow.push(`Internal`);
                 bottomHeaderRow.push(`${part.co}`);
                 topHeaderRow.push(""); midHeaderRow.push(""); bottomHeaderRow.push("Lvl");
                 topHeaderRow.push(""); midHeaderRow.push(""); bottomHeaderRow.push("Met?");
@@ -789,6 +752,7 @@ const CoPoAttainmentPage = () => {
                 </div>
             )}
 
+            {/* --- FINAL BACKEND SUMMARIES --- */}
             {reportData && (
                 <div className="mt-8 space-y-6">
                     <Card className="shadow-sm">
