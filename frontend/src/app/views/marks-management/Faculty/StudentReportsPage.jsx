@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../shared/Card';
 import { useAuth } from 'app/contexts/AuthContext';
-import api, { fetchAllPages } from '../../../services/api'; // IMPORT ADDED HERE
+import api, { fetchAllPages } from '../../../services/api';
 import { Download, Loader2, Search, Filter, Eye } from 'lucide-react'; 
 import { useNavigate } from 'react-router-dom'; 
 import { TableSkeleton } from '../shared/SkeletonLoaders';
@@ -26,7 +26,6 @@ const StudentReportsPage = () => {
         if (!user) return;
         setLoading(true);
         try {
-            // RECURSIVE FETCH IMPLEMENTED HERE
             const coursesData = await fetchAllPages('/courses/');
         
             // Ensure it's an array before filtering
@@ -51,7 +50,6 @@ const StudentReportsPage = () => {
             if (!selectedCourseId) return;
             setLoading(true);
             try {
-                // RECURSIVE FETCH IMPLEMENTED HERE
                 const [fetchedStudents, fetchedMarks] = await Promise.all([
                     fetchAllPages('/students/'),
                     fetchAllPages(`/marks/?course=${selectedCourseId}`)
@@ -131,6 +129,7 @@ const StudentReportsPage = () => {
                 }
             });
 
+            // Keep these calculations for the percentage and result, even though they won't be displayed
             const total = cieObtained + seeObtained;
             const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
             const result = percentage >= 40 ? 'PASS' : 'FAIL';
@@ -139,14 +138,8 @@ const StudentReportsPage = () => {
                 id: student.id,
                 usn: student.usn,
                 name: student.name,
-                cie: cieObtained,
-                see: seeObtained,
-                total: total,
                 percentage: percentage.toFixed(1),
-                result: result,
-                maxCie,
-                maxSee,
-                maxTotal
+                result: result
             };
         });
     }, [selectedCourse, allStudents, allMarks, selectedCourseId]);
@@ -161,8 +154,8 @@ const StudentReportsPage = () => {
     const handleExport = () => {
         if (!filteredData.length) return;
         const csvContent = "data:text/csv;charset=utf-8," 
-            + "USN,Name,CIE Obtained,SEE Obtained,Total,Percentage,Result\n"
-            + filteredData.map(r => `${r.usn},${r.name},${r.cie},${r.see},${r.total},${r.percentage}%,${r.result}`).join("\n");
+            + "USN,Name,Percentage,Result\n"
+            + filteredData.map(r => `${r.usn},${r.name},${r.percentage}%,${r.result}`).join("\n");
         
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
@@ -183,7 +176,7 @@ const StudentReportsPage = () => {
         });
     };
 
-    if (loading) return <div className="p-6 space-y-6 pb-10"><div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-8"></div><TableSkeleton rows={15} columns={9} /></div>;
+    if (loading) return <div className="p-6 space-y-6 pb-10"><div className="w-64 h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-8"></div><TableSkeleton rows={15} columns={5} /></div>;
 
     return (
         <div className="space-y-6">
@@ -238,15 +231,6 @@ const StudentReportsPage = () => {
                                     <tr>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">USN</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Name</th>
-                                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                            CIE <span className="text-gray-400">({reportData[0]?.maxCie || 0})</span>
-                                        </th>
-                                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                            SEE <span className="text-gray-400">({reportData[0]?.maxSee || 0})</span>
-                                        </th>
-                                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                            Total <span className="text-gray-400">({reportData[0]?.maxTotal || 0})</span>
-                                        </th>
                                         <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Percentage</th>
                                         <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Result</th>
                                         <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
@@ -257,9 +241,6 @@ const StudentReportsPage = () => {
                                         <tr key={student.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{student.usn}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{student.name}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-gray-900 dark:text-white">{student.cie}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-gray-900 dark:text-white">{student.see}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-bold text-gray-900 dark:text-white">{student.total}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500 dark:text-gray-400">{student.percentage}%</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-center">
                                                 <span className={`px-2 inline-flex text-xs leading-5 font-bold rounded-full ${
@@ -283,7 +264,7 @@ const StudentReportsPage = () => {
                                         </tr>
                                     )) : (
                                         <tr>
-                                            <td colSpan="8" className="px-6 py-10 text-center text-gray-500 dark:text-gray-400">
+                                            <td colSpan="5" className="px-6 py-10 text-center text-gray-500 dark:text-gray-400">
                                                 No students found matching your search.
                                             </td>
                                         </tr>

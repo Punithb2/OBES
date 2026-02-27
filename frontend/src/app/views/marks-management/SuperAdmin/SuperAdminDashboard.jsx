@@ -23,13 +23,15 @@ const SuperAdminDashboard = () => {
     try {
       setLoading(true);
       
-      const [usersRes, coursesRes, deptsRes] = await Promise.all([
+      // FIX: Added the /students/ endpoint to fetch the actual student count
+      const [usersRes, coursesRes, deptsRes, studentsRes] = await Promise.all([
         api.get('/users/'),
         api.get('/courses/'),
-        api.get('/departments/')
+        api.get('/departments/'),
+        api.get('/students/') 
       ]);
 
-      // FIX: Safely extract data handling Django's paginated responses
+      // Safely extract data handling Django's paginated responses
       const users = usersRes.data.results || usersRes.data || [];
       const courses = coursesRes.data.results || coursesRes.data || [];
       const depts = deptsRes.data.results || deptsRes.data || [];
@@ -40,17 +42,17 @@ const SuperAdminDashboard = () => {
       const safeDepts = Array.isArray(depts) ? depts : [];
 
       const totalFaculty = safeUsers.filter(u => u.role === 'faculty').length;
-      const totalStudents = safeUsers.filter(u => u.role === 'student').length; 
-
-      // Alternatively, if the API uses pagination and you just want the total count without downloading everything:
-      // const totalCourses = coursesRes.data.count !== undefined ? coursesRes.data.count : safeCourses.length;
-      // const totalDepts = deptsRes.data.count !== undefined ? deptsRes.data.count : safeDepts.length;
+      
+      // FIX: Count students directly from the students endpoint response
+      const totalStudents = studentsRes.data.count !== undefined 
+          ? studentsRes.data.count 
+          : (studentsRes.data.results || studentsRes.data || []).length;
 
       setStats({
         faculty: totalFaculty,
         students: totalStudents,
-        courses: safeCourses.length,
-        departments: safeDepts.length
+        courses: coursesRes.data.count !== undefined ? coursesRes.data.count : safeCourses.length,
+        departments: deptsRes.data.count !== undefined ? deptsRes.data.count : safeDepts.length
       });
       
     } catch (error) {
